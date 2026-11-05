@@ -17,3 +17,85 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
 }
+
+/*
+  Tema Infranexia (Telkom Infrastruktur Indonesia) untuk area teknisi.
+  Palet "sky" dipetakan ulang ke merah merek di dalam .theme-tif, sehingga
+  link, tombol utama, dan sorotan otomatis mengikuti merek tanpa mengubah
+  halaman admin. Warna status (hijau/merah/kuning) tidak diubah.
+*/
+.theme-tif {
+  --color-sky-50: #fff3f3;
+  --color-sky-100: #ffe2e2;
+  --color-sky-200: #ffc9c9;
+  --color-sky-300: #ffa3a3;
+  --color-sky-400: #f46b6e;
+  --color-sky-500: #e63a40;
+  --color-sky-600: #d41f26;
+  --color-sky-700: #b3151c;
+  --color-sky-800: #8f1318;
+  --color-sky-900: #6f1216;
+  --tif-red: #d41f26;
+  --tif-red-deep: #8f1318;
+  --tif-ink: #1c1517;
+}
+
+.tif-hero {
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgb(255 255 255 / 0.14) 0%, transparent 55%),
+    linear-gradient(135deg, var(--tif-red) 0%, var(--tif-red-deep) 100%);
+}
+
+.tif-grid {
+  background-image:
+    linear-gradient(rgb(255 255 255 / 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.08) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: linear-gradient(to left, black 0%, transparent 75%);
+}
+
+@keyframes server-bob {
+  0%, 100% { transform: translateX(-7px); }
+  50% { transform: translateX(7px); }
+}
+
+@keyframes server-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes server-scan {
+  0% { transform: translateY(0); opacity: 0; }
+  15%, 85% { opacity: 1; }
+  100% { transform: translateY(72px); opacity: 0; }
+}
+
+@keyframes server-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.15; }
+}
+
+.server-rack {
+  animation: server-float 1.6s ease-in-out infinite;
+}
+
+.server-unit {
+  animation: server-bob 1.2s ease-in-out infinite;
+}
+
+.server-scan {
+  animation: server-scan 1.2s linear infinite;
+}
+
+.server-led {
+  animation: server-blink 0.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .server-rack,
+  .server-unit,
+  .server-scan,
+  .server-led {
+    animation: none;
+  }
+}

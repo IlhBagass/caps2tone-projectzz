@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { DemoLoading } from "@/components/demo-loading";
 import { ChassisList } from "@/components/chassis-list";
 import { getOffice } from "@/lib/mock-data";
 
@@ -34,7 +35,9 @@ async function OfficeContent({
           Pilih chassis, lalu scan chassis sebelum memindai modulnya.
         </p>
       </div>
-      <ChassisList officeId={office.id} />
+      <DemoLoading>
+        <ChassisList officeId={office.id} />
+      </DemoLoading>
     </div>
   );
 }

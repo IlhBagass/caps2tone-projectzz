@@ -34,11 +34,25 @@ export interface Asset {
   labelCode: string | null; // kode dari QR label fisik
 }
 
+export type Area = "grobogan" | "solo";
+
+export const AREA_LABEL: Record<Area, string> = {
+  grobogan: "Grobogan",
+  solo: "Solo",
+};
+
+// Seorang teknisi bisa melayani satu atau kedua area.
+export interface Technician {
+  name: string;
+  areas: Area[];
+}
+
 export type ScheduleStatus = "terjadwal" | "berjalan" | "selesai" | "dibatalkan";
 
 export interface MappingSchedule {
   id: number;
   officeId: number;
+  area: Area;
   scheduledDate: string; // YYYY-MM-DD
   assignedTo: string | null; // nama teknisi, opsional
   status: ScheduleStatus;

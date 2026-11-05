@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
+import { DemoLoading } from "@/components/demo-loading";
 import { ChassisWorkspace } from "@/components/chassis-workspace";
 import { assets, getOffice } from "@/lib/mock-data";
 
@@ -29,10 +30,12 @@ async function ChassisContent({
   if (!office || !chassis) notFound();
 
   return (
-    <ChassisWorkspace
-      officeId={office.id}
-      officeName={office.name}
-      chassisId={chassis.id}
-    />
+    <DemoLoading>
+      <ChassisWorkspace
+        officeId={office.id}
+        officeName={office.name}
+        chassisId={chassis.id}
+      />
+    </DemoLoading>
   );
 }

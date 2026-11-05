@@ -7,6 +7,7 @@ import type {
   MappingSchedule,
   MappingStatus,
   Office,
+  Technician,
 } from "./types";
 
 export function isoDate(offsetDays = 0): string {
@@ -112,14 +113,14 @@ export const assets: Asset[] = [...assetSeeds, ...generateAssets()].map((a) => (
 }));
 
 export const schedules: MappingSchedule[] = [
-  { id: 1, officeId: 1, scheduledDate: isoDate(0), assignedTo: "Budi Santoso", status: "berjalan" },
-  { id: 2, officeId: 2, scheduledDate: isoDate(0), assignedTo: null, status: "terjadwal" },
-  { id: 3, officeId: 3, scheduledDate: isoDate(2), assignedTo: "Budi Santoso", status: "terjadwal" },
-  { id: 4, officeId: 1, scheduledDate: isoDate(-3), assignedTo: "Budi Santoso", status: "selesai" },
-  { id: 5, officeId: 4, scheduledDate: isoDate(0), assignedTo: "Budi Santoso", status: "terjadwal" },
-  { id: 6, officeId: 5, scheduledDate: isoDate(0), assignedTo: null, status: "terjadwal" },
-  { id: 7, officeId: 6, scheduledDate: isoDate(0), assignedTo: "Budi Santoso", status: "terjadwal" },
-  { id: 8, officeId: 7, scheduledDate: isoDate(3), assignedTo: "Sari Wulandari", status: "terjadwal" },
+  { id: 1, officeId: 1, area: "solo", scheduledDate: isoDate(0), assignedTo: "Budi Santoso", status: "berjalan" },
+  { id: 2, officeId: 2, area: "solo", scheduledDate: isoDate(0), assignedTo: null, status: "terjadwal" },
+  { id: 3, officeId: 3, area: "solo", scheduledDate: isoDate(2), assignedTo: "Budi Santoso", status: "terjadwal" },
+  { id: 4, officeId: 1, area: "solo", scheduledDate: isoDate(-3), assignedTo: "Budi Santoso", status: "selesai" },
+  { id: 5, officeId: 4, area: "solo", scheduledDate: isoDate(0), assignedTo: "Budi Santoso", status: "terjadwal" },
+  { id: 6, officeId: 5, area: "solo", scheduledDate: isoDate(0), assignedTo: null, status: "terjadwal" },
+  { id: 7, officeId: 6, area: "solo", scheduledDate: isoDate(0), assignedTo: "Budi Santoso", status: "terjadwal" },
+  { id: 8, officeId: 7, area: "solo", scheduledDate: isoDate(3), assignedTo: "Sari Wulandari", status: "terjadwal" },
 ];
 
 export const results: MappingResult[] = [
@@ -132,7 +133,12 @@ export const history: AssetHistory[] = [
   { id: 2, assetId: 10, field: "kondisi", oldValue: "Normal", newValue: "Rusak", changedBy: "Budi Santoso", changedAt: new Date(Date.now() - 864e5).toISOString() },
 ];
 
-export const mockTechnicians = ["Budi Santoso", "Sari Wulandari"];
+export const technicians: Technician[] = [
+  { name: "Budi Santoso", areas: ["solo"] },
+  { name: "Sari Wulandari", areas: ["solo", "grobogan"] },
+  { name: "Dimas Prakoso", areas: ["grobogan"] },
+  { name: "Rina Kusuma", areas: ["grobogan", "solo"] },
+];
 export const currentTechnician = "Budi Santoso";
 
 export function getOffice(id: number): Office | undefined {
