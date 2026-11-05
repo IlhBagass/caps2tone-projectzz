@@ -21,11 +21,35 @@ import {
 const btn =
   "rounded-md border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50";
 
+type SortKey =
+  | "eq"
+  | "kind"
+  | "serialNumber"
+  | "office"
+  | "ref"
+  | "status"
+  | "kondisi"
+  | "labelStatus"
+  | "labelCode";
+
+const columns: { key: SortKey; label: string }[] = [
+  { key: "eq", label: "EQ" },
+  { key: "kind", label: "Jenis" },
+  { key: "serialNumber", label: "Serial" },
+  { key: "office", label: "Kantor" },
+  { key: "ref", label: "REF" },
+  { key: "status", label: "Status" },
+  { key: "kondisi", label: "Kondisi" },
+  { key: "labelStatus", label: "Label" },
+  { key: "labelCode", label: "Kode label" },
+];
+
 export function AssetTable() {
   // Sementara di memori browser. Ganti dengan API saat database siap.
   const [assets, setAssets] = useState(initialAssets);
   const [history, setHistory] = useState(initialHistory);
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" } | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<(ParseResult & { name: string }) | null>(null);
@@ -77,6 +101,31 @@ export function AssetTable() {
       a.serialNumber.toLowerCase().includes(q) ||
       a.assetCode.toLowerCase().includes(q),
   );
+
+  function sortValue(a: (typeof assets)[number], key: SortKey): string {
+    if (key === "office") return getOffice(a.officeId)?.name ?? "";
+    return String(a[key] ?? "");
+  }
+
+  const sorted = sort
+    ? [...filtered].sort((x, y) => {
+        const r = sortValue(x, sort.key).localeCompare(sortValue(y, sort.key), "id", {
+          numeric: true,
+          sensitivity: "base",
+        });
+        return sort.dir === "asc" ? r : -r;
+      })
+    : filtered;
+
+  function toggleSort(key: SortKey) {
+    setSort((s) =>
+      !s || s.key !== key
+        ? { key, dir: "asc" }
+        : s.dir === "asc"
+          ? { key, dir: "desc" }
+          : null,
+    );
+  }
 
   return (
     <div className="space-y-3">
@@ -161,15 +210,33 @@ export function AssetTable() {
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 text-slate-600">
             <tr>
-              <th className="px-4 py-2 font-medium">EQ</th>
-              <th className="px-4 py-2 font-medium">Jenis</th>
-              <th className="px-4 py-2 font-medium">Serial</th>
-              <th className="px-4 py-2 font-medium">Kantor</th>
-              <th className="px-4 py-2 font-medium">REF</th>
-              <th className="px-4 py-2 font-medium">Status</th>
-              <th className="px-4 py-2 font-medium">Kondisi</th>
-              <th className="px-4 py-2 font-medium">Label</th>
-              <th className="px-4 py-2 font-medium">Kode label</th>
+              {columns.map((c) => (
+                <th
+                  key={c.key}
+                  className="px-4 py-2 font-medium"
+                  aria-sort={
+                    sort?.key === c.key
+                      ? sort.dir === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : "none"
+                  }
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleSort(c.key)}
+                    className="inline-flex items-center gap-1 hover:text-slate-900"
+                  >
+                    {c.label}
+                    <span
+                      aria-hidden
+                      className={sort?.key === c.key ? "text-slate-900" : "text-slate-400"}
+                    >
+                      {sort?.key === c.key ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}
+                    </span>
+                  </button>
+                </th>
+              ))}
               <th className="px-4 py-2" />
             </tr>
           </thead>
@@ -181,7 +248,7 @@ export function AssetTable() {
                 </td>
               </tr>
             )}
-            {filtered.map((a) => {
+            {sorted.map((a) => {
               const rows = history.filter((h) => h.assetId === a.id);
               return (
                 <Fragment key={a.id}>
@@ -203,7 +270,7 @@ export function AssetTable() {
                       <button
                         type="button"
                         onClick={() => setOpenId(openId === a.id ? null : a.id)}
-                        className="text-sky-700 hover:underline"
+                        className="text-slate-700 underline-offset-2 hover:underline"
                       >
                         Riwayat
                       </button>

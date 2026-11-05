@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/badge";
 import { TechnicianPicker } from "@/components/technician-picker";
+import { TelegramNotifyPanel } from "@/components/telegram-notify-panel";
 import {
   getOffice,
   isoDate,
@@ -13,9 +14,9 @@ import {
 import { AREA_LABEL } from "@/lib/types";
 import type { Area, MappingSchedule, ScheduleStatus } from "@/lib/types";
 
-const statusTone: Record<ScheduleStatus, "gray" | "blue" | "green" | "red"> = {
+const statusTone: Record<ScheduleStatus, "gray" | "info" | "green" | "red"> = {
   terjadwal: "gray",
-  berjalan: "blue",
+  berjalan: "info",
   selesai: "green",
   dibatalkan: "red",
 };
@@ -31,7 +32,7 @@ const isActive = (s: MappingSchedule) =>
 
 export function ScheduleManager() {
   const [items, setItems] = useState<MappingSchedule[]>(initialSchedules);
-  const [officeId, setOfficeId] = useState(String(offices[0].id));
+  const [officeIds, setOfficeIds] = useState<number[]>([]);
   const [area, setArea] = useState<Area>("solo");
   const [date, setDate] = useState("");
   const [technician, setTechnician] = useState("");
@@ -65,6 +66,7 @@ export function ScheduleManager() {
   function openModal() {
     setError(null);
     setArea("solo");
+    setOfficeIds([]);
     setDate("");
     setTechnician("");
     setModalOpen(true);
@@ -90,26 +92,46 @@ export function ScheduleManager() {
     if (technician && !techniciansIn(next).includes(technician)) setTechnician("");
   }
 
+  function toggleOffice(id: number) {
+    setOfficeIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  }
+
+  // Satu kali simpan = satu jadwal per kantor yang dipilih, semuanya untuk
+  // teknisi dan tanggal yang sama.
   function handleAdd(e: React.FormEvent) {
     e.preventDefault();
-    const problem = validate(Number(officeId), date);
-    if (problem) {
-      setError(problem);
+    if (officeIds.length === 0) {
+      setError("Pilih minimal satu kantor.");
+      return;
+    }
+    const problems = officeIds
+      .map((id) => ({ id, problem: validate(id, date) }))
+      .filter((x) => x.problem);
+    if (problems.length > 0) {
+      const names = problems.map((x) => getOffice(x.id)?.name).join(", ");
+      setError(
+        !date || date < today()
+          ? problems[0].problem
+          : `Sudah ada jadwal aktif di tanggal itu untuk: ${names}. Hapus centang kantor tersebut.`,
+      );
       return;
     }
     setModalOpen(false);
     setError(null);
-    setItems((prev) => [
-      ...prev,
-      {
-        id: Math.max(0, ...prev.map((s) => s.id)) + 1,
-        officeId: Number(officeId),
-        area,
-        scheduledDate: date,
-        assignedTo: technician || null,
-        status: "terjadwal",
-      },
-    ]);
+    setItems((prev) => {
+      let nextId = Math.max(0, ...prev.map((s) => s.id));
+      return [
+        ...prev,
+        ...officeIds.map((id) => ({
+          id: ++nextId,
+          officeId: id,
+          area,
+          scheduledDate: date,
+          assignedTo: technician || null,
+          status: "terjadwal" as const,
+        })),
+      ];
+    });
   }
 
   // Mengembalikan pesan error, atau null jika berhasil disimpan.
@@ -166,6 +188,7 @@ export function ScheduleManager() {
 
   return (
     <div className="space-y-6">
+      <TelegramNotifyPanel schedules={items} />
       <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <input
@@ -179,7 +202,7 @@ export function ScheduleManager() {
           <button
             type="button"
             onClick={openModal}
-            className="rounded-md bg-sky-600 px-4 py-2 font-medium text-white hover:bg-sky-700"
+            className="rounded-md bg-slate-800 px-4 py-2 font-medium text-white hover:bg-slate-900"
           >
             + Tambah jadwal
           </button>
@@ -258,7 +281,7 @@ export function ScheduleManager() {
             <button
               type="button"
               onClick={resetFilters}
-              className="text-sky-700 hover:underline"
+              className="text-slate-700 underline-offset-2 hover:underline"
             >
               Reset filter
             </button>
@@ -277,7 +300,7 @@ export function ScheduleManager() {
             aria-labelledby="add-schedule-title"
             onSubmit={handleAdd}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md space-y-4 rounded-xl bg-white p-5 shadow-xl"
+            className="max-h-[92dvh] w-full max-w-md space-y-4 overflow-y-auto rounded-xl bg-white p-5 shadow-xl"
           >
             <h2 id="add-schedule-title" className="text-lg font-semibold">
               Tambah jadwal mapping
@@ -296,20 +319,43 @@ export function ScheduleManager() {
                 ))}
               </select>
             </label>
-            <label className="block text-sm font-medium">
-              Kantor
-              <select
-                value={officeId}
-                onChange={(e) => setOfficeId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
-              >
+            <fieldset>
+              <div className="flex items-center justify-between">
+                <legend className="text-sm font-medium">
+                  Kantor <span className="font-normal text-slate-500">({officeIds.length} dipilih)</span>
+                </legend>
+                <div className="flex gap-3 text-xs">
+                  <button
+                    type="button"
+                    className="text-slate-700 underline-offset-2 hover:underline"
+                    onClick={() => setOfficeIds(offices.map((o) => o.id))}
+                  >
+                    Pilih semua
+                  </button>
+                  <button
+                    type="button"
+                    className="text-slate-700 underline-offset-2 hover:underline"
+                    onClick={() => setOfficeIds([])}
+                  >
+                    Kosongkan
+                  </button>
+                </div>
+              </div>
+              <ul className="mt-1 max-h-48 divide-y divide-slate-100 overflow-y-auto rounded-md border border-slate-300">
                 {offices.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.name}
-                  </option>
+                  <li key={o.id}>
+                    <label className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm font-normal hover:bg-slate-50">
+                      <input
+                        type="checkbox"
+                        checked={officeIds.includes(o.id)}
+                        onChange={() => toggleOffice(o.id)}
+                      />
+                      {o.name}
+                    </label>
+                  </li>
                 ))}
-              </select>
-            </label>
+              </ul>
+            </fieldset>
             <label className="block text-sm font-medium">
               Tanggal
               <input
@@ -340,9 +386,9 @@ export function ScheduleManager() {
               </button>
               <button
                 type="submit"
-                className="rounded-md bg-sky-600 px-4 py-2 font-medium text-white hover:bg-sky-700"
+                className="rounded-md bg-slate-800 px-4 py-2 font-medium text-white hover:bg-slate-900"
               >
-                Simpan jadwal
+                {officeIds.length > 1 ? `Simpan ${officeIds.length} jadwal` : "Simpan jadwal"}
               </button>
             </div>
           </form>
@@ -393,7 +439,7 @@ export function ScheduleManager() {
                         <button
                           type="button"
                           onClick={() => setEditingId(s.id)}
-                          className="text-sky-700 hover:underline"
+                          className="text-slate-700 underline-offset-2 hover:underline"
                         >
                           Ubah
                         </button>
@@ -433,7 +479,7 @@ function EditRow({
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <tr className="border-t border-slate-100 bg-sky-50/50">
+    <tr className="border-t border-slate-100 bg-slate-50">
       <td className="px-4 py-2">
         <input
           type="date"
@@ -460,7 +506,7 @@ function EditRow({
         <button
           type="button"
           onClick={() => setError(onSave(schedule.id, day, tech || null))}
-          className="text-sky-700 hover:underline"
+          className="text-slate-700 underline-offset-2 hover:underline"
         >
           Simpan
         </button>

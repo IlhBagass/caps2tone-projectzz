@@ -1,7 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useState } from "react";
+import { findByUsername } from "@/lib/employee-store";
 
 // Login sementara: belum ada autentikasi. Username "admin" masuk ke /admin,
 // selain itu masuk ke /teknisi. Ganti dengan auth asli saat backend siap.
@@ -15,6 +17,17 @@ export default function LoginPage() {
     e.preventDefault();
     if (!username.trim() || !password) {
       setError("Username dan password wajib diisi.");
+      return;
+    }
+    const emp = findByUsername(username);
+    if (emp && emp.status !== "aktif") {
+      setError(
+        emp.status === "menunggu"
+          ? "Akun kamu masih menunggu persetujuan admin."
+          : emp.status === "ditolak"
+            ? "Pendaftaran akun kamu ditolak. Hubungi admin."
+            : "Akun kamu dinonaktifkan. Hubungi admin.",
+      );
       return;
     }
     setError(null);
@@ -63,6 +76,13 @@ export default function LoginPage() {
         >
           Masuk
         </button>
+
+        <p className="text-center text-sm text-slate-600">
+          Belum punya akun?{" "}
+          <Link href="/daftar" className="text-sky-700 hover:underline">
+            Daftar
+          </Link>
+        </p>
 
         <p className="text-xs text-slate-500">
           Mode pengembangan: ketik <b>admin</b> untuk halaman admin, nama lain

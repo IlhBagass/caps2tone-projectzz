@@ -1,5 +1,6 @@
 // DATA SEMENTARA untuk pengembangan front end. Ganti dengan pemanggilan API
 // setelah backend siap.
+import { jakartaDayOffset } from "./date";
 import type {
   Asset,
   AssetHistory,
@@ -11,9 +12,7 @@ import type {
 } from "./types";
 
 export function isoDate(offsetDays = 0): string {
-  const d = new Date();
-  d.setDate(d.getDate() + offsetDays);
-  return d.toISOString().slice(0, 10);
+  return jakartaDayOffset(offsetDays);
 }
 
 const extraOffices: Office[] = [
@@ -131,6 +130,7 @@ export const results: MappingResult[] = [
 export const history: AssetHistory[] = [
   { id: 1, assetId: 10, field: "status", oldValue: "Aktif", newValue: "Rusak", changedBy: "Budi Santoso", changedAt: new Date(Date.now() - 864e5).toISOString() },
   { id: 2, assetId: 10, field: "kondisi", oldValue: "Normal", newValue: "Rusak", changedBy: "Budi Santoso", changedAt: new Date(Date.now() - 864e5).toISOString() },
+  { id: 3, assetId: 4, field: "ref", oldValue: "RK-01", newValue: "RK-03", changedBy: "Budi Santoso", changedAt: new Date().toISOString() },
 ];
 
 export const technicians: Technician[] = [
@@ -144,3 +144,12 @@ export const currentTechnician = "Budi Santoso";
 export function getOffice(id: number): Office | undefined {
   return offices.find((o) => o.id === id);
 }
+
+// DATA SEMENTARA: status teknisi sudah menekan Start di bot Telegram atau belum.
+// Nanti diganti kolom users.telegram_chat_id (terisi = terhubung).
+export const telegramLinked: Record<string, boolean> = {
+  "Budi Santoso": true,
+  "Sari Wulandari": true,
+  "Dimas Prakoso": false,
+  "Rina Kusuma": true,
+};

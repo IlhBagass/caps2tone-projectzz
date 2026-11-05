@@ -18,7 +18,10 @@ export default function AdminReportPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Laporan hasil mapping</h1>
+      <h1 className="flex items-center gap-2 text-xl font-semibold">
+        <span className="h-6 w-1 rounded-full bg-slate-700" aria-hidden />
+        Laporan hasil mapping
+      </h1>
 
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
         <table className="w-full text-left text-sm">

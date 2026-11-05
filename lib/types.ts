@@ -79,6 +79,21 @@ export interface AssetHistory {
   changedAt: string; // ISO
 }
 
+// Data karyawan. Akun baru berstatus "menunggu" sampai disetujui admin.
+export type EmployeeType = "karyawan" | "magang";
+export type EmployeeStatus = "menunggu" | "aktif" | "ditolak" | "nonaktif";
+
+export interface Employee {
+  id: number;
+  name: string;
+  username: string;
+  type: EmployeeType;
+  areas: Area[];
+  status: EmployeeStatus;
+  registeredAt: string; // ISO
+  decidedAt: string | null; // ISO, waktu disetujui/ditolak admin
+}
+
 // Bentuk respons POST /api/scan/match
 export interface MatchResponse {
   result: MatchResultType;
