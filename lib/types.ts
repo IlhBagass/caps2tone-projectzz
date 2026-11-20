@@ -32,6 +32,24 @@ export interface Asset {
   officeId: number;
   labelStatus: "terpasang" | "belum";
   labelCode: string | null; // kode dari QR label fisik
+  photoUrl?: string | null; // foto validasi dari teknisi
+  rejection?: MappingRejection | null; // diisi saat admin menolak hasil mapping
+}
+
+export interface MappingRejection {
+  reason: string;
+  rejectedBy: string;
+  rejectedAt: string; // ISO
+}
+
+export const UNKNOWN_VALUE = "Belum diketahui";
+
+// STATUS dan KONDISI belum diketahui sampai aset selesai dimapping teknisi.
+export function displayAssetValue(
+  asset: Pick<Asset, "mappingStatus">,
+  value: string,
+): string {
+  return asset.mappingStatus === "sudah" ? value : UNKNOWN_VALUE;
 }
 
 export type Area = "grobogan" | "solo";

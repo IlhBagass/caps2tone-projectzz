@@ -10,7 +10,13 @@ import {
   normalizeSerial,
   validateSerial,
 } from "@/lib/match";
-import type { Asset, MatchResponse, MatchResultType } from "@/lib/types";
+import { currentTechnician } from "@/lib/mock-data";
+import type {
+  Asset,
+  AssetHistory,
+  MatchResponse,
+  MatchResultType,
+} from "@/lib/types";
 
 const STATUS_OPTIONS = ["Aktif", "Rusak", "Tidak Aktif"];
 
@@ -36,7 +42,7 @@ const resultTone: Record<MatchResultType, "green" | "red" | "amber"> = {
 };
 
 export function MappingWorkspace({ chassisId }: { chassisId: number }) {
-  const { assets, updateAsset } = useMapping();
+  const { assets, updateAsset, addHistory } = useMapping();
   const [sn, setSn] = useState("");
   const [scanning, setScanning] = useState(false);
   const [scanningLabel, setScanningLabel] = useState(false);
@@ -109,12 +115,21 @@ export function MappingWorkspace({ chassisId }: { chassisId: number }) {
         changes.push(`STATUS: ${selected.status} → ${status}`);
     }
     if (selected) {
+      const now = new Date().toISOString();
+      const entries: Omit<AssetHistory, "id">[] = [];
+      if (ref !== selected.ref)
+        entries.push({ assetId: selected.id, field: "ref", oldValue: selected.ref, newValue: ref, changedBy: currentTechnician, changedAt: now });
+      if (status !== selected.status)
+        entries.push({ assetId: selected.id, field: "status", oldValue: selected.status, newValue: status, changedBy: currentTechnician, changedAt: now });
+      addHistory(entries);
       updateAsset(selected.id, {
         ref,
         status,
         mappingStatus: "sudah",
         labelStatus: "terpasang",
         labelCode: trimmedLabel,
+        photoUrl,
+        rejection: null,
       });
     }
     setSaved((prev) => [
@@ -247,6 +262,13 @@ export function MappingWorkspace({ chassisId }: { chassisId: number }) {
             <p className="rounded-md bg-amber-50 p-2 text-sm text-amber-800">
               Modul ini terdaftar di chassis lain di database. Pastikan modul
               benar-benar terpasang di chassis ini sebelum menyimpan.
+            </p>
+          )}
+
+          {selected?.rejection && (
+            <p className="rounded-md bg-red-50 p-2 text-sm text-red-800">
+              Mapping sebelumnya ditolak admin. Alasan: {selected.rejection.reason}.
+              Mohon validasi ulang.
             </p>
           )}
 

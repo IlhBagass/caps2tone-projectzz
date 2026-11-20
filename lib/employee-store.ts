@@ -57,6 +57,36 @@ export function registerEmployee(input: {
   return { ok: true };
 }
 
+// Dipakai admin: akun langsung aktif tanpa menunggu persetujuan.
+export function addEmployee(input: {
+  name: string;
+  username: string;
+  type: EmployeeType;
+  areas: Area[];
+}): { ok: true; list: Employee[] } | { ok: false; message: string } {
+  const list = loadEmployees();
+  const username = input.username.trim().toLowerCase();
+  if (username === "admin" || list.some((e) => e.username === username)) {
+    return { ok: false, message: "Username sudah dipakai." };
+  }
+  const now = new Date().toISOString();
+  const next: Employee[] = [
+    ...list,
+    {
+      id: Math.max(0, ...list.map((e) => e.id)) + 1,
+      name: input.name.trim(),
+      username,
+      type: input.type,
+      areas: input.areas,
+      status: "aktif",
+      registeredAt: now,
+      decidedAt: now,
+    },
+  ];
+  saveEmployees(next);
+  return { ok: true, list: next };
+}
+
 export function setEmployeeStatus(id: number, status: EmployeeStatus): Employee[] {
   const next = loadEmployees().map((e) =>
     e.id === id ? { ...e, status, decidedAt: new Date().toISOString() } : e,

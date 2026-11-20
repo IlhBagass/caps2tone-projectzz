@@ -11,12 +11,13 @@ import {
   type ParseResult,
 } from "@/lib/asset-excel";
 import {
-  assets as initialAssets,
-  currentTechnician,
-  getOffice,
-  history as initialHistory,
-  offices,
-} from "@/lib/mock-data";
+  appendHistory,
+  setAssets,
+  updateAsset,
+  useAssetStore,
+} from "@/lib/asset-store";
+import { currentTechnician, getOffice, offices } from "@/lib/mock-data";
+import { displayAssetValue, UNKNOWN_VALUE } from "@/lib/types";
 
 const btn =
   "rounded-md border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50";
@@ -45,9 +46,12 @@ const columns: { key: SortKey; label: string }[] = [
 ];
 
 export function AssetTable() {
-  // Sementara di memori browser. Ganti dengan API saat database siap.
-  const [assets, setAssets] = useState(initialAssets);
-  const [history, setHistory] = useState(initialHistory);
+  // Sementara di memori browser (dibagi dengan halaman teknisi). Ganti dengan
+  // API saat database siap.
+  const { assets, history } = useAssetStore();
+  const [photoOpen, setPhotoOpen] = useState<{ src: string; title: string } | null>(null);
+  const [rejecting, setRejecting] = useState<{ id: number; eq: string } | null>(null);
+  const [reason, setReason] = useState("");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" } | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
@@ -84,13 +88,27 @@ export function AssetTable() {
     if (!preview) return;
     const res = applyImport(assets, preview.rows, currentTechnician, history.length + 1);
     setAssets(res.assets);
-    setHistory((h) => [...h, ...res.newHistory]);
+    appendHistory(res.newHistory);
     setNotice({
       tone: "ok",
       text: `Impor selesai: ${res.added} aset baru, ${res.updated} diperbarui, ${preview.errors.length} baris dilewati.`,
       details: res.warnings,
     });
     setPreview(null);
+  }
+
+  // Mapping yang ditolak dikembalikan ke "belum" supaya teknisi mengulang.
+  // Foto dan kode label lama dipertahankan sebagai bahan tinjauan.
+  function confirmReject() {
+    const text = reason.trim();
+    if (!rejecting || !text) return;
+    updateAsset(rejecting.id, {
+      mappingStatus: "belum",
+      rejection: { reason: text, rejectedBy: "Admin", rejectedAt: new Date().toISOString() },
+    });
+    setRejecting(null);
+    setReason("");
+    setNotice({ tone: "ok", text: `Mapping ${rejecting.eq} ditolak dan dikembalikan ke teknisi.` });
   }
 
   const q = query.trim().toLowerCase();
@@ -104,6 +122,7 @@ export function AssetTable() {
 
   function sortValue(a: (typeof assets)[number], key: SortKey): string {
     if (key === "office") return getOffice(a.officeId)?.name ?? "";
+    if (key === "status" || key === "kondisi") return displayAssetValue(a, a[key]);
     return String(a[key] ?? "");
   }
 
@@ -237,13 +256,14 @@ export function AssetTable() {
                   </button>
                 </th>
               ))}
+              <th className="px-4 py-2 font-medium">Foto</th>
               <th className="px-4 py-2" />
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-4 py-6 text-center text-slate-600">
+                <td colSpan={11} className="px-4 py-6 text-center text-slate-600">
                   Tidak ada aset yang cocok.
                 </td>
               </tr>
@@ -258,15 +278,54 @@ export function AssetTable() {
                     <td className="px-4 py-2 font-mono">{a.serialNumber}</td>
                     <td className="px-4 py-2">{getOffice(a.officeId)?.name}</td>
                     <td className="px-4 py-2">{a.ref}</td>
-                    <td className="px-4 py-2">{a.status}</td>
-                    <td className="px-4 py-2">{a.kondisi}</td>
+                    <td className="px-4 py-2">
+                      <UnknownAware value={displayAssetValue(a, a.status)} />
+                    </td>
+                    <td className="px-4 py-2">
+                      <UnknownAware value={displayAssetValue(a, a.kondisi)} />
+                    </td>
                     <td className="px-4 py-2">
                       <Badge tone={a.labelStatus === "terpasang" ? "green" : "gray"}>
                         {a.labelStatus}
                       </Badge>
                     </td>
                     <td className="px-4 py-2 font-mono">{a.labelCode ?? "-"}</td>
-                    <td className="px-4 py-2 text-right">
+                    <td className="px-4 py-2">
+                      {a.photoUrl ? (
+                        <button
+                          type="button"
+                          onClick={() => setPhotoOpen({ src: a.photoUrl!, title: `${a.eq} · ${a.labelCode ?? "tanpa label"}` })}
+                          aria-label={`Lihat foto validasi ${a.eq}`}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={a.photoUrl}
+                            alt={`Foto validasi ${a.eq}`}
+                            className="h-10 w-14 rounded border border-slate-200 object-cover"
+                          />
+                        </button>
+                      ) : (
+                        <span className="text-slate-400">-</span>
+                      )}
+                    </td>
+                    <td className="space-x-3 whitespace-nowrap px-4 py-2 text-right">
+                      {a.rejection && a.mappingStatus !== "sudah" && (
+                        <span title={a.rejection.reason}>
+                          <Badge tone="red">Ditolak</Badge>
+                        </span>
+                      )}
+                      {a.mappingStatus === "sudah" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReason("");
+                            setRejecting({ id: a.id, eq: a.eq });
+                          }}
+                          className="text-red-700 underline-offset-2 hover:underline"
+                        >
+                          Tolak
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setOpenId(openId === a.id ? null : a.id)}
@@ -276,9 +335,18 @@ export function AssetTable() {
                       </button>
                     </td>
                   </tr>
+                  {a.rejection && a.mappingStatus !== "sudah" && (
+                    <tr className="bg-red-50">
+                      <td colSpan={11} className="px-4 py-2 text-red-800">
+                        <b>Mapping ditolak</b> oleh {a.rejection.rejectedBy},{" "}
+                        {new Date(a.rejection.rejectedAt).toLocaleString("id-ID")}.{" "}
+                        <b>Alasan:</b> {a.rejection.reason}
+                      </td>
+                    </tr>
+                  )}
                   {openId === a.id && (
                     <tr key={`${a.id}-history`} className="bg-slate-50">
-                      <td colSpan={10} className="px-4 py-3">
+                      <td colSpan={11} className="px-4 py-3">
                         {rows.length === 0 ? (
                           <p className="text-slate-600">
                             Belum ada riwayat perubahan.
@@ -306,6 +374,87 @@ export function AssetTable() {
           </tbody>
         </table>
       </div>
+
+      {rejecting && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Tolak mapping"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setRejecting(null)}
+        >
+          <div
+            className="w-full max-w-md space-y-3 rounded-xl bg-white p-4 text-sm"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="font-medium">Tolak mapping {rejecting.eq}</p>
+            <p className="text-slate-600">
+              Aset dikembalikan ke status belum dimapping dan teknisi diminta
+              mengulang.
+            </p>
+            <label className="block font-medium">
+              Alasan penolakan
+              <textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                rows={3}
+                autoFocus
+                placeholder="Contoh: foto buram, kode label tidak sesuai"
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button type="button" className={btn} onClick={() => setRejecting(null)}>
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={!reason.trim()}
+                onClick={confirmReject}
+                className="rounded-md bg-red-600 px-3 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                Tolak mapping
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {photoOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Foto validasi"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setPhotoOpen(null)}
+        >
+          <div
+            className="max-h-full max-w-3xl space-y-2 rounded-xl bg-white p-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-4 text-sm">
+              <span className="font-medium">{photoOpen.title}</span>
+              <button type="button" className={btn} onClick={() => setPhotoOpen(null)}>
+                Tutup
+              </button>
+            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={photoOpen.src}
+              alt="Foto validasi"
+              className="max-h-[75vh] w-full rounded object-contain"
+            />
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function UnknownAware({ value }: { value: string }) {
+  return value === UNKNOWN_VALUE ? (
+    <span className="italic text-slate-400">{value}</span>
+  ) : (
+    <>{value}</>
   );
 }
