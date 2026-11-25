@@ -47,6 +47,13 @@ export const AssetIcon = () => (
   </Icon>
 );
 
+export const InventoryIcon = () => (
+  <Icon>
+    <path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z" />
+    <path d="M3 7.5 12 12l9-4.5M12 12v9" />
+  </Icon>
+);
+
 export const UsersIcon = () => (
   <Icon>
     <circle cx="9" cy="8" r="3.5" />

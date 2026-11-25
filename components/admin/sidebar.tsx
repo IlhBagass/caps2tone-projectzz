@@ -4,6 +4,7 @@ import {
   AssetIcon,
   CalendarIcon,
   DashboardIcon,
+  InventoryIcon,
   LogoutIcon,
   ReportIcon,
   UsersIcon,
@@ -63,6 +64,9 @@ export async function AdminSidebar() {
             <NavLink href="/admin/aset" icon={<AssetIcon />}>
               Data Aset
             </NavLink>
+            <NavLink href="/admin/inventaris" icon={<InventoryIcon />}>
+              Inventaris
+            </NavLink>
           </Group>
           <Group label="Pengaturan">
             <NavLink href="/admin/karyawan" icon={<UsersIcon />}>
@@ -105,6 +109,9 @@ export async function AdminSidebar() {
         </NavLink>
         <NavLink href="/admin/aset" icon={<AssetIcon />}>
           Data Aset
+        </NavLink>
+        <NavLink href="/admin/inventaris" icon={<InventoryIcon />}>
+          Inventaris
         </NavLink>
         <NavLink href="/admin/laporan" icon={<ReportIcon />}>
           Laporan
