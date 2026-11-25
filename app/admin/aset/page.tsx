@@ -1,5 +1,4 @@
 import { AssetTable } from "@/components/asset-table";
-import { DemoLoading } from "@/components/demo-loading";
 
 export default function AdminAssetsPage() {
   return (
@@ -8,9 +7,7 @@ export default function AdminAssetsPage() {
         <span className="h-6 w-1 rounded-full bg-slate-700" aria-hidden />
         Data aset
       </h1>
-      <DemoLoading>
-        <AssetTable />
-      </DemoLoading>
+      <AssetTable />
     </div>
   );
 }
