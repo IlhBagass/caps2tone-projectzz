@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { AdminSidebar, SidebarSkeleton } from "@/components/admin/sidebar";
 import { BrandMark } from "@/components/brand-mark";
+import { LogoutButton } from "@/components/logout-button";
 import { getCurrentUser } from "@/lib/session";
 
 async function HeaderUser() {
@@ -36,12 +37,7 @@ export default function AdminLayout({ children }: LayoutProps<"/admin">) {
             <Suspense fallback={<UserChip name="…" />}>
               <HeaderUser />
             </Suspense>
-            <Link
-              href="/login"
-              className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:border-sky-600 hover:text-sky-700"
-            >
-              Keluar
-            </Link>
+            <LogoutButton className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:border-sky-600 hover:text-sky-700 disabled:opacity-60" />
           </div>
         </div>
       </header>

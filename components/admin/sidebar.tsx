@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { connection } from "next/server";
 import { NavLink } from "@/components/nav-link";
 import {
@@ -10,6 +9,7 @@ import {
   UsersIcon,
 } from "@/components/admin/icons";
 import { getTodaySchedules } from "@/lib/admin-dashboard";
+import { LogoutButton } from "@/components/logout-button";
 import { getCurrentUser } from "@/lib/session";
 
 function Group({ label, children }: { label: string; children: React.ReactNode }) {
@@ -83,13 +83,10 @@ export async function AdminSidebar() {
               </span>
             </span>
           </div>
-          <Link
-            href="/login"
-            className="mt-2 flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-          >
+          <LogoutButton className="mt-2 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-60">
             <LogoutIcon />
             Keluar
-          </Link>
+          </LogoutButton>
         </div>
       </nav>
 

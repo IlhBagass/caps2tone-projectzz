@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { BrandMark } from "@/components/brand-mark";
+import { LogoutButton } from "@/components/logout-button";
 import { MappingProvider } from "@/components/mapping-provider";
 
 export default function TeknisiLayout({ children }: LayoutProps<"/teknisi">) {
@@ -11,12 +12,7 @@ export default function TeknisiLayout({ children }: LayoutProps<"/teknisi">) {
           <Link href="/teknisi" aria-label="Beranda teknisi">
             <BrandMark />
           </Link>
-          <Link
-            href="/login"
-            className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:border-sky-600 hover:text-sky-700"
-          >
-            Keluar
-          </Link>
+          <LogoutButton className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:border-sky-600 hover:text-sky-700 disabled:opacity-60" />
         </div>
       </header>
       <main className="flex-1 px-4 py-5">

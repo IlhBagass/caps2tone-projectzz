@@ -3,35 +3,39 @@
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useState } from "react";
-import { findByUsername } from "@/lib/employee-store";
+import { ApiError } from "@/lib/api";
+import { api, setCsrfToken } from "@/lib/api-client";
+import type { Role } from "@/lib/types";
 
-// Login sementara: belum ada autentikasi. Username "admin" masuk ke /admin,
-// selain itu masuk ke /teknisi. Ganti dengan auth asli saat backend siap.
+// Login ke backend (cookie sesi httpOnly + token CSRF). Admin masuk ke /admin, teknisi ke /teknisi.
 export default function LoginPage() {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!username.trim() || !password) {
       setError("Username dan password wajib diisi.");
       return;
     }
-    const emp = findByUsername(username);
-    if (emp && emp.status !== "aktif") {
-      setError(
-        emp.status === "menunggu"
-          ? "Akun kamu masih menunggu persetujuan admin."
-          : emp.status === "ditolak"
-            ? "Pendaftaran akun kamu ditolak. Hubungi admin."
-            : "Akun kamu dinonaktifkan. Hubungi admin.",
-      );
-      return;
-    }
     setError(null);
-    router.push(username.trim().toLowerCase() === "admin" ? "/admin" : "/teknisi");
+    setBusy(true);
+    try {
+      // Pesan error (salah password, akun menunggu persetujuan, ditolak) datang dari backend.
+      const data = await api.post<{ user: { role: Role }; csrfToken: string }>("/api/auth/login", {
+        username: username.trim(),
+        password,
+      });
+      setCsrfToken(data.csrfToken);
+      router.replace(data.user.role === "admin" ? "/admin" : "/teknisi");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Terjadi kesalahan. Coba lagi.");
+      setBusy(false);
+    }
   }
 
   return (
@@ -72,9 +76,10 @@ export default function LoginPage() {
 
         <button
           type="submit"
-          className="w-full rounded-md bg-sky-600 py-2.5 font-medium text-white hover:bg-sky-700"
+          disabled={busy}
+          className="w-full rounded-md bg-sky-600 py-2.5 font-medium text-white hover:bg-sky-700 disabled:opacity-60"
         >
-          Masuk
+          {busy ? "Masuk…" : "Masuk"}
         </button>
 
         <p className="text-center text-sm text-slate-600">
@@ -84,10 +89,6 @@ export default function LoginPage() {
           </Link>
         </p>
 
-        <p className="text-xs text-slate-500">
-          Mode pengembangan: ketik <b>admin</b> untuk halaman admin, nama lain
-          untuk halaman teknisi. Password bebas.
-        </p>
       </form>
     </main>
   );
