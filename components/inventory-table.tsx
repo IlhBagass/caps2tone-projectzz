@@ -253,7 +253,7 @@ export function InventoryTable() {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+      <div className="@container overflow-x-auto rounded-xl border border-slate-200 bg-white">
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 text-slate-600">
             <tr>
@@ -313,13 +313,16 @@ export function InventoryTable() {
                   {openId === item.id && (
                     <tr className="bg-slate-50">
                       <td colSpan={8} className="px-4 py-3">
-                        {!detail || detail.loading ? (
-                          <p className="text-slate-600">Memuat detail…</p>
-                        ) : detail.error || !detail.data ? (
-                          <p className="text-red-700">Detail tidak dapat dimuat. {detail.error}</p>
-                        ) : (
-                          <DetailPanel detail={detail.data} />
-                        )}
+                        {/* Tabel bisa lebih lebar dari layar; panel menempel di tepi kiri area yang terlihat. */}
+                        <div className="sticky left-0 w-[calc(100cqw-2rem)]">
+                          {!detail || detail.loading ? (
+                            <p className="text-slate-600">Memuat detail…</p>
+                          ) : detail.error || !detail.data ? (
+                            <p className="text-red-700">Detail tidak dapat dimuat. {detail.error}</p>
+                          ) : (
+                            <DetailPanel detail={detail.data} />
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )}

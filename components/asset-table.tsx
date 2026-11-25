@@ -293,7 +293,7 @@ export function AssetTable() {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+      <div className="@container overflow-x-auto rounded-xl border border-slate-200 bg-white">
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 text-slate-600">
             <tr>
@@ -405,32 +405,37 @@ export function AssetTable() {
                   {a.rejection && a.mappingStatus !== "sudah" && (
                     <tr className="bg-red-50">
                       <td colSpan={11} className="px-4 py-2 text-red-800">
-                        <b>Mapping ditolak</b> oleh {a.rejection.rejectedBy},{" "}
-                        {new Date(a.rejection.rejectedAt).toLocaleString("id-ID")}. <b>Alasan:</b> {a.rejection.reason}
+                        <div className="sticky left-0 w-[calc(100cqw-2rem)]">
+                          <b>Mapping ditolak</b> oleh {a.rejection.rejectedBy},{" "}
+                          {new Date(a.rejection.rejectedAt).toLocaleString("id-ID")}. <b>Alasan:</b> {a.rejection.reason}
+                        </div>
                       </td>
                     </tr>
                   )}
                   {openId === a.id && (
                     <tr key={`${a.id}-history`} className="bg-slate-50">
                       <td colSpan={11} className="px-4 py-3">
-                        {!history || history.loading ? (
-                          <p className="text-slate-600">Memuat riwayat…</p>
-                        ) : history.error ? (
-                          <p className="text-red-700">Riwayat tidak dapat dimuat. {history.error}</p>
-                        ) : history.rows.length === 0 ? (
-                          <p className="text-slate-600">Belum ada riwayat perubahan.</p>
-                        ) : (
-                          <ul className="space-y-1">
-                            {history.rows.map((h) => (
-                              <li key={h.id}>
-                                <b>{h.field.toUpperCase()}</b>: {h.oldValue} → {h.newValue}{" "}
-                                <span className="text-slate-500">
-                                  oleh {h.changedBy}, {new Date(h.changedAt).toLocaleString("id-ID")}
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
+                        {/* Tabel bisa lebih lebar dari layar; riwayat menempel di tepi kiri area yang terlihat. */}
+                        <div className="sticky left-0 w-[calc(100cqw-2rem)]">
+                          {!history || history.loading ? (
+                            <p className="text-slate-600">Memuat riwayat…</p>
+                          ) : history.error ? (
+                            <p className="text-red-700">Riwayat tidak dapat dimuat. {history.error}</p>
+                          ) : history.rows.length === 0 ? (
+                            <p className="text-slate-600">Belum ada riwayat perubahan.</p>
+                          ) : (
+                            <ul className="space-y-1">
+                              {history.rows.map((h) => (
+                                <li key={h.id}>
+                                  <b>{h.field.toUpperCase()}</b>: {h.oldValue} → {h.newValue}{" "}
+                                  <span className="text-slate-500">
+                                    oleh {h.changedBy}, {new Date(h.changedAt).toLocaleString("id-ID")}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )}
