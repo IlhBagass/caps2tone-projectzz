@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/badge";
-import { addEmployee, loadEmployees, setEmployeeStatus } from "@/lib/employee-store";
+import { errorMessage } from "@/lib/api";
+import { createEmployee, decideEmployee, listEmployees, passwordProblem } from "@/lib/employees";
 import {
   AREA_LABEL,
   type Area,
@@ -41,55 +42,96 @@ const emptyForm = {
 const input = "mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2";
 
 export function EmployeeManager() {
-  // null = belum dibaca dari localStorage (hanya tersedia di browser).
+  // null = belum dimuat dari backend.
   const [employees, setEmployees] = useState<Employee[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [filter, setFilter] = useState<"semua" | EmployeeStatus>("semua");
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [formError, setFormError] = useState<string | null>(null);
 
+  function load() {
+    setLoadError(null);
+    listEmployees().then(setEmployees, (err) => setLoadError(errorMessage(err)));
+  }
+
   useEffect(() => {
-    queueMicrotask(() => setEmployees(loadEmployees()));
+    let cancelled = false;
+    listEmployees().then(
+      (list) => !cancelled && setEmployees(list),
+      (err) => !cancelled && setLoadError(errorMessage(err)),
+    );
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  function submitNew(e: React.FormEvent) {
+  async function submitNew(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim() || !form.username.trim() || !form.password) {
       setFormError("Nama, username, dan password wajib diisi.");
       return;
     }
-    if (form.password.length < 8) {
-      setFormError("Password minimal 8 karakter.");
+    const weak = passwordProblem(form.password);
+    if (weak) {
+      setFormError(weak);
       return;
     }
     if (form.areas.length === 0) {
       setFormError("Pilih minimal satu area.");
       return;
     }
-    // TODO: kirim ke API; password di-hash di server, tidak disimpan di klien.
-    const res = addEmployee({
-      name: form.name,
-      username: form.username,
-      type: form.type,
-      areas: form.areas,
-    });
-    if (!res.ok) {
-      setFormError(res.message);
-      return;
+    setSaving(true);
+    try {
+      // Password dikirim ke backend dan di-hash di server; akun dari admin langsung aktif.
+      const created = await createEmployee({
+        name: form.name,
+        username: form.username,
+        password: form.password,
+        type: form.type,
+        areas: form.areas,
+      });
+      setEmployees((list) => [created, ...(list ?? [])]);
+      setForm(emptyForm);
+      setFormError(null);
+      setAdding(false);
+      setNotice(`Akun ${created.username} ditambahkan dan langsung aktif.`);
+    } catch (err) {
+      setFormError(errorMessage(err, { CONFLICT: "Username sudah dipakai." }));
+    } finally {
+      setSaving(false);
     }
-    setEmployees(res.list);
-    setForm(emptyForm);
-    setFormError(null);
-    setAdding(false);
   }
 
-  if (employees === null) return null;
+  if (loadError && employees === null) {
+    return (
+      <div role="alert" className="space-y-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+        <p>Data karyawan tidak dapat dimuat. {loadError}</p>
+        <button type="button" className={btn} onClick={load}>
+          Coba lagi
+        </button>
+      </div>
+    );
+  }
+  if (employees === null) return <p className="text-sm text-slate-600">Memuat data karyawan…</p>;
 
   const pending = employees.filter((e) => e.status === "menunggu");
   const shown = employees.filter((e) => filter === "semua" || e.status === filter);
 
-  function decide(id: number, status: EmployeeStatus) {
-    setEmployees(setEmployeeStatus(id, status));
+  async function decide(id: number, status: EmployeeStatus) {
+    setBusyId(id);
+    setNotice(null);
+    try {
+      const updated = await decideEmployee(id, status);
+      setEmployees((list) => (list ?? []).map((e) => (e.id === id ? updated : e)));
+    } catch (err) {
+      setNotice(errorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
   }
 
   return (
@@ -125,7 +167,7 @@ export function EmployeeManager() {
               />
             </label>
             <label className="block font-medium">
-              Password (min. 8 karakter)
+              Password (min. 12 karakter)
               <input
                 type="password"
                 value={form.password}
@@ -168,10 +210,20 @@ export function EmployeeManager() {
           </fieldset>
           {formError && <p className="text-red-700">{formError}</p>}
           <p className="text-xs text-slate-500">Akun yang ditambahkan admin langsung aktif tanpa perlu persetujuan.</p>
-          <button type="submit" className="rounded-md bg-slate-800 px-4 py-2 font-medium text-white hover:bg-slate-900">
-            Simpan karyawan
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-md bg-slate-800 px-4 py-2 font-medium text-white hover:bg-slate-900 disabled:opacity-60"
+          >
+            {saving ? "Menyimpan…" : "Simpan karyawan"}
           </button>
         </form>
+      )}
+
+      {notice && (
+        <p role="status" className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-800">
+          {notice}
+        </p>
       )}
 
       {pending.length > 0 && (
@@ -188,12 +240,13 @@ export function EmployeeManager() {
                 </div>
                 <button
                   type="button"
-                  className="rounded-md bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900"
+                  disabled={busyId === e.id}
+                  className="rounded-md bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900 disabled:opacity-60"
                   onClick={() => decide(e.id, "aktif")}
                 >
                   Setujui
                 </button>
-                <button type="button" className={btn} onClick={() => decide(e.id, "ditolak")}>
+                <button type="button" disabled={busyId === e.id} className={`${btn} disabled:opacity-60`} onClick={() => decide(e.id, "ditolak")}>
                   Tolak
                 </button>
               </li>
@@ -253,12 +306,12 @@ export function EmployeeManager() {
                 </td>
                 <td className="px-4 py-2 text-right">
                   {e.status === "aktif" && (
-                    <button type="button" className="text-slate-700 underline-offset-2 hover:underline" onClick={() => decide(e.id, "nonaktif")}>
+                    <button type="button" disabled={busyId === e.id} className="text-slate-700 underline-offset-2 hover:underline disabled:opacity-60" onClick={() => decide(e.id, "nonaktif")}>
                       Nonaktifkan
                     </button>
                   )}
                   {(e.status === "nonaktif" || e.status === "ditolak") && (
-                    <button type="button" className="text-slate-700 underline-offset-2 hover:underline" onClick={() => decide(e.id, "aktif")}>
+                    <button type="button" disabled={busyId === e.id} className="text-slate-700 underline-offset-2 hover:underline disabled:opacity-60" onClick={() => decide(e.id, "aktif")}>
                       Aktifkan
                     </button>
                   )}

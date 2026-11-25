@@ -25,6 +25,25 @@ export interface Envelope<T> {
   meta?: PageMeta;
 }
 
+/**
+ * Pesan error yang ramah untuk ditampilkan. `overrides` memetakan kode error backend ke pesan khusus
+ * (mis. CONFLICT = username sudah dipakai); selain itu dipakai pesan dari backend.
+ */
+export function errorMessage(
+  error: unknown,
+  overrides: Record<string, string> = {},
+  fallback = "Terjadi kesalahan. Coba lagi.",
+): string {
+  if (!(error instanceof ApiError)) return fallback;
+  if (overrides[error.code]) return overrides[error.code];
+  if (error.status === 429) return "Terlalu banyak percobaan. Tunggu sebentar lalu coba lagi.";
+  if (error.code === "VALIDATION_ERROR" && Array.isArray(error.details)) {
+    const field = (error.details[0] as { field?: string } | undefined)?.field;
+    return field ? `Isian "${field}" tidak valid.` : "Input tidak valid.";
+  }
+  return error.message || fallback;
+}
+
 const toCamel = (key: string) => key.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());
 const toSnake = (key: string) => key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 

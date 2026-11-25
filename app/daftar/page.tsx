@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { registerEmployee } from "@/lib/employee-store";
+import { errorMessage } from "@/lib/api";
+import { passwordProblem, registerAccount } from "@/lib/employees";
 import { AREA_LABEL, type Area, type EmployeeType } from "@/lib/types";
 
 const field = "mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-base";
@@ -15,12 +16,13 @@ export default function RegisterPage() {
   const [areas, setAreas] = useState<Area[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   function toggleArea(a: Area) {
     setAreas((cur) => (cur.includes(a) ? cur.filter((x) => x !== a) : [...cur, a]));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim() || !username.trim() || !password) {
       setError("Nama, username, dan password wajib diisi.");
@@ -30,22 +32,26 @@ export default function RegisterPage() {
       setError("Username minimal 3 karakter (huruf, angka, titik, strip, atau garis bawah).");
       return;
     }
-    if (password.length < 8) {
-      setError("Password minimal 8 karakter.");
+    const weak = passwordProblem(password);
+    if (weak) {
+      setError(weak);
       return;
     }
     if (areas.length === 0) {
       setError("Pilih minimal satu area.");
       return;
     }
-    // TODO: kirim ke API; password harus di-hash di server, bukan disimpan di klien.
-    const res = registerEmployee({ name, username, type, areas });
-    if (!res.ok) {
-      setError(res.message);
-      return;
-    }
     setError(null);
-    setDone(true);
+    setBusy(true);
+    try {
+      // Password dikirim ke backend dan di-hash di server; akun berstatus "menunggu" sampai admin menyetujui.
+      await registerAccount({ name, username, password, type, areas });
+      setDone(true);
+    } catch (err) {
+      setError(errorMessage(err, { CONFLICT: "Username sudah dipakai." }));
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (done) {
@@ -88,7 +94,7 @@ export default function RegisterPage() {
           <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" className={field} />
         </label>
         <label className="block text-sm font-medium">
-          Password
+          Password (min. 12 karakter)
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" className={field} />
         </label>
         <label className="block text-sm font-medium">
@@ -112,8 +118,12 @@ export default function RegisterPage() {
 
         {error && <p className="text-sm text-red-700">{error}</p>}
 
-        <button type="submit" className="w-full rounded-md bg-sky-600 py-2.5 font-medium text-white hover:bg-sky-700">
-          Daftar
+        <button
+          type="submit"
+          disabled={busy}
+          className="w-full rounded-md bg-sky-600 py-2.5 font-medium text-white hover:bg-sky-700 disabled:opacity-60"
+        >
+          {busy ? "Mendaftar…" : "Daftar"}
         </button>
         <p className="text-center text-sm text-slate-600">
           Sudah punya akun?{" "}
