@@ -38,7 +38,10 @@ export function SidebarSkeleton() {
 export async function AdminSidebar() {
   await connection();
   const user = await getCurrentUser();
-  const jadwalHariIni = getTodaySchedules().filter((s) => s.status !== "dibatalkan").length;
+  // Lencana jumlah jadwal hari ini; bila backend tidak terjangkau, menu tetap tampil tanpa lencana.
+  const jadwalHariIni = await getTodaySchedules()
+    .then((list) => list.filter((s) => s.status !== "dibatalkan").length)
+    .catch(() => 0);
   const name = user?.name ?? "Admin";
 
   return (

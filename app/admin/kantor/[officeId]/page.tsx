@@ -3,8 +3,10 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { Badge } from "@/components/badge";
+import { LoadError } from "@/components/admin/load-error";
 import { StateBadge } from "@/components/admin/office-progress-table";
 import { getOfficeDetail } from "@/lib/admin-dashboard";
+import { errorMessage } from "@/lib/api";
 import { requireAdmin } from "@/lib/session";
 import { mappingLabel, mappingTone } from "@/lib/status";
 
@@ -28,7 +30,12 @@ async function OfficeDetail({
 
   const { officeId } = await params;
   const id = Number(officeId);
-  const detail = Number.isInteger(id) ? getOfficeDetail(id) : null;
+  let detail;
+  try {
+    detail = Number.isInteger(id) && id > 0 ? await getOfficeDetail(id) : null;
+  } catch (err) {
+    return <LoadError message={errorMessage(err)} />;
+  }
   if (!detail) notFound();
   const { office, progress, assets } = detail;
 
