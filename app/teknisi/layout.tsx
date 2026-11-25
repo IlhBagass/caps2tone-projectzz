@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { BrandMark } from "@/components/brand-mark";
 import { LogoutButton } from "@/components/logout-button";
-import { MappingProvider } from "@/components/mapping-provider";
+import { TechnicianProvider } from "@/components/technician-provider";
 
 export default function TeknisiLayout({ children }: LayoutProps<"/teknisi">) {
   return (
@@ -16,7 +16,7 @@ export default function TeknisiLayout({ children }: LayoutProps<"/teknisi">) {
         </div>
       </header>
       <main className="flex-1 px-4 py-5">
-        <MappingProvider>{children}</MappingProvider>
+        <TechnicianProvider>{children}</TechnicianProvider>
       </main>
       <footer className="border-t border-slate-200 bg-white px-4 py-3 text-center text-[11px] text-slate-500">
         Sistem Mapping Aset · Telkom Infrastruktur Indonesia
