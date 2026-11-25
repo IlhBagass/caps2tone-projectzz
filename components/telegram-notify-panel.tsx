@@ -1,92 +1,82 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Badge } from "@/components/badge";
-import { formatDay } from "@/lib/date";
-import { assets, getOffice, isoDate, telegramLinked } from "@/lib/mock-data";
-import type { MappingSchedule } from "@/lib/types";
-
-interface OfficeLoad {
-  name: string;
-  total: number; // semua aset (chassis dan modul) di kantor
-  remaining: number; // aset yang masih harus dimapping (status belum)
-}
-
-interface Recipient {
-  name: string;
-  offices: OfficeLoad[];
-  linked: boolean;
-}
-
-function officeLoad(officeId: number): OfficeLoad {
-  const items = assets.filter((a) => a.officeId === officeId);
-  return {
-    name: getOffice(officeId)?.name ?? "-",
-    total: items.length,
-    remaining: items.filter((a) => a.mappingStatus === "belum").length,
-  };
-}
+import { ApiError, errorMessage } from "@/lib/api";
+import { formatDay, jakartaDay } from "@/lib/date";
+import {
+  previewNotify,
+  sendNotify,
+  type NotifyPreview,
+  type NotifyResult,
+} from "@/lib/schedules";
 
 interface SendLog {
   date: string;
   time: string;
-  sent: number;
-  skipped: number;
+  result: NotifyResult;
 }
 
-function buildMessage(day: string, name: string, offices: OfficeLoad[]): string {
-  const lines = offices
-    .map((o, i) => `${i + 1}. ${o.name}: ${o.remaining} perangkat belum termapping (dari ${o.total})`)
-    .join("\n");
-  const remaining = offices.reduce((n, o) => n + o.remaining, 0);
-  return `Jadwal mapping ${formatDay(day)}\nHalo ${name}, kamu bertugas di:\n${lines}\n\nTotal yang harus dimapping: ${remaining} perangkat.\nSelamat bekerja.`;
-}
+const wib = (iso: string) =>
+  new Date(iso).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" });
 
-// Kirim manual, satu pesan per teknisi per hari (isinya semua kantor teknisi itu
-// pada tanggal tersebut). MODE PROTOTIPE: belum memanggil Telegram. Saat backend
-// siap, tombol kirim memanggil route handler di server (token hanya di server).
-export function TelegramNotifyPanel({ schedules }: { schedules: MappingSchedule[] }) {
+// Kirim manual, satu pesan per teknisi per hari (isinya semua kantor teknisi itu pada tanggal tersebut).
+// Pratinjau dan pengiriman dilakukan backend; token bot dan chat ID tidak pernah sampai ke browser.
+// refreshKey berubah saat jadwal di halaman berubah, supaya pratinjau ikut dimuat ulang.
+export function TelegramNotifyPanel({ refreshKey = 0 }: { refreshKey?: number }) {
   const [day, setDay] = useState("");
+  const [preview, setPreview] = useState<NotifyPreview | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [log, setLog] = useState<SendLog | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [sentKey, setSentKey] = useState(0);
 
   // Tanggal awal = hari ini; dihitung setelah mount agar tidak ikut ter-prerender.
   useEffect(() => {
-    queueMicrotask(() => setDay((d) => d || isoDate(0)));
+    queueMicrotask(() => setDay((d) => d || jakartaDay()));
   }, []);
 
-  const { recipients, unassigned } = useMemo(() => {
-    const active = schedules.filter(
-      (s) => s.scheduledDate === day && (s.status === "terjadwal" || s.status === "berjalan"),
+  useEffect(() => {
+    if (!day) return;
+    let cancelled = false;
+    previewNotify(day).then(
+      (data) => {
+        if (cancelled) return;
+        setPreview(data);
+        setLoadError(null);
+      },
+      (err) => !cancelled && setLoadError(errorMessage(err)),
     );
-    const byTech = new Map<string, OfficeLoad[]>();
-    const missing: string[] = [];
-    for (const s of active) {
-      const load = officeLoad(s.officeId);
-      if (!s.assignedTo) missing.push(load.name);
-      else byTech.set(s.assignedTo, [...(byTech.get(s.assignedTo) ?? []), load]);
+    return () => {
+      cancelled = true;
+    };
+  }, [day, refreshKey, sentKey]);
+
+  async function send() {
+    setSending(true);
+    setSendError(null);
+    try {
+      const result = await sendNotify(day);
+      setLog({ date: day, time: wib(new Date().toISOString()), result });
+      setSentKey((k) => k + 1);
+    } catch (err) {
+      setSendError(
+        err instanceof ApiError && err.code === "TELEGRAM_NOT_CONFIGURED"
+          ? "Bot Telegram belum dikonfigurasi di server, jadi pesan belum bisa dikirim."
+          : errorMessage(err),
+      );
+    } finally {
+      setSending(false);
     }
-    const list: Recipient[] = [...byTech.entries()]
-      .map(([name, offices]) => ({ name, offices: offices.sort((a, b) => a.name.localeCompare(b.name, "id")), linked: telegramLinked[name] === true }))
-      .sort((a, b) => a.name.localeCompare(b.name, "id"));
-    return { recipients: list, unassigned: missing.sort() };
-  }, [schedules, day]);
-
-  const sendable = recipients.filter((r) => r.linked);
-  const skipped = recipients.length - sendable.length;
-  const thisLog = log && log.date === day ? log : null;
-
-  function send() {
-    setLog({
-      date: day,
-      time: new Date().toLocaleTimeString("id-ID", {
-        timeZone: "Asia/Jakarta",
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-      sent: sendable.length,
-      skipped,
-    });
   }
+
+  const current = preview && preview.date === day ? preview : null;
+  const recipients = current?.recipients ?? [];
+  const unassigned = current?.unassigned ?? [];
+  const sendable = current?.sendable ?? 0;
+  const skipped = current?.skipped ?? 0;
+  const thisLog = log && log.date === day ? log : null;
 
   return (
     <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
@@ -108,48 +98,61 @@ export function TelegramNotifyPanel({ schedules }: { schedules: MappingSchedule[
         </label>
       </div>
 
-      {recipients.length === 0 && unassigned.length === 0 ? (
+      {loadError && (
+        <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">
+          Pratinjau tidak dapat dimuat. {loadError}
+        </p>
+      )}
+
+      {!loadError && current === null ? (
+        <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">Memuat pratinjau…</p>
+      ) : recipients.length === 0 && unassigned.length === 0 ? (
         <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
           Tidak ada jadwal aktif pada tanggal ini.
         </p>
       ) : (
-        <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-          {recipients.map((r) => (
-            <li key={r.name} className="flex flex-wrap items-start justify-between gap-2 p-3 text-sm">
-              <div className="min-w-0">
-                <p className="font-medium">{r.name}</p>
-                <p className="text-xs text-slate-600">
-                  {r.offices.map((o) => o.name).join(", ")} ·{" "}
-                  <span className="font-medium tabular-nums">
-                    {r.offices.reduce((n, o) => n + o.remaining, 0)} perangkat harus dimapping
-                  </span>
-                </p>
-                <details className="mt-1 text-xs text-slate-500">
-                  <summary className="cursor-pointer">Lihat pesan</summary>
-                  <pre className="mt-1 whitespace-pre-wrap rounded-md bg-slate-50 p-2 font-sans">
-                    {buildMessage(day, r.name, r.offices)}
-                  </pre>
-                </details>
-              </div>
-              {r.linked ? (
-                <Badge tone="green">Telegram terhubung</Badge>
-              ) : (
-                <Badge tone="amber">Belum terhubung</Badge>
-              )}
-            </li>
-          ))}
-        </ul>
+        recipients.length > 0 && (
+          <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+            {recipients.map((r) => (
+              <li key={r.userId} className="flex flex-wrap items-start justify-between gap-2 p-3 text-sm">
+                <div className="min-w-0">
+                  <p className="font-medium">{r.name}</p>
+                  <p className="text-xs text-slate-600">
+                    {r.offices.map((o) => o.officeName).join(", ")} ·{" "}
+                    <span className="font-medium tabular-nums">{r.totalRemaining} perangkat harus dimapping</span>
+                  </p>
+                  {r.lastSent && (
+                    <p className={`text-xs ${r.lastSent.success ? "text-emerald-700" : "text-red-700"}`}>
+                      {r.lastSent.success
+                        ? `Terakhir terkirim pukul ${wib(r.lastSent.at)} WIB`
+                        : `Pengiriman terakhir gagal pukul ${wib(r.lastSent.at)} WIB`}
+                    </p>
+                  )}
+                  <details className="mt-1 text-xs text-slate-500">
+                    <summary className="cursor-pointer">Lihat pesan</summary>
+                    <pre className="mt-1 whitespace-pre-wrap rounded-md bg-slate-50 p-2 font-sans">{r.message}</pre>
+                  </details>
+                </div>
+                {r.linked ? (
+                  <Badge tone="green">Telegram terhubung</Badge>
+                ) : (
+                  <Badge tone="amber">Belum terhubung</Badge>
+                )}
+              </li>
+            ))}
+          </ul>
+        )
       )}
 
       {unassigned.length > 0 && (
         <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-          Belum ada teknisi untuk {unassigned.join(", ")}. Jadwal ini tidak terkirim ke siapa pun.
+          Belum ada teknisi untuk {unassigned.map((u) => u.officeName).join(", ")}. Jadwal ini tidak terkirim ke
+          siapa pun.
         </p>
       )}
       {skipped > 0 && (
         <p className="text-xs text-slate-600">
-          {skipped} teknisi belum menghubungkan Telegram (belum menekan Start di bot), jadi
-          dilewati.
+          {skipped} teknisi belum menghubungkan Telegram (belum menekan Start di bot), jadi dilewati.
         </p>
       )}
 
@@ -157,20 +160,35 @@ export function TelegramNotifyPanel({ schedules }: { schedules: MappingSchedule[
         <button
           type="button"
           onClick={send}
-          disabled={sendable.length === 0}
+          disabled={sendable === 0 || sending}
           className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:opacity-50"
         >
-          Kirim ke {sendable.length} teknisi
+          {sending ? "Mengirim…" : `Kirim ke ${sendable} teknisi`}
         </button>
         {thisLog && (
-          <span role="status" className="text-sm text-emerald-700">
-            Terkirim ke {thisLog.sent} teknisi pukul {thisLog.time} WIB
-            {thisLog.skipped > 0 ? `, ${thisLog.skipped} dilewati` : ""}.
+          <span
+            role="status"
+            className={`text-sm ${thisLog.result.failed > 0 ? "text-amber-800" : "text-emerald-700"}`}
+          >
+            Terkirim ke {thisLog.result.sent} teknisi pukul {thisLog.time} WIB
+            {thisLog.result.skipped > 0 ? `, ${thisLog.result.skipped} dilewati` : ""}
+            {thisLog.result.failed > 0
+              ? `, ${thisLog.result.failed} gagal (${thisLog.result.results
+                  .filter((x) => x.status === "failed")
+                  .map((x) => x.name)
+                  .join(", ")})`
+              : ""}
+            .
+          </span>
+        )}
+        {sendError && (
+          <span role="alert" className="text-sm text-red-700">
+            {sendError}
           </span>
         )}
       </div>
       <p className="text-xs text-slate-500">
-        Mode prototipe: pesan belum benar-benar terkirim sampai bot Telegram dihubungkan.
+        {day ? `Jadwal ${formatDay(day)}. ` : ""}Pesan hanya terkirim ke teknisi yang Telegram-nya terhubung.
       </p>
     </section>
   );

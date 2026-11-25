@@ -35,6 +35,22 @@ export async function listEmployees(): Promise<Employee[]> {
   }
 }
 
+export interface TechnicianOption {
+  id: number;
+  name: string;
+  areas: Area[];
+}
+
+/** Teknisi aktif untuk dipilih sebagai penanggung jawab jadwal. */
+export async function listActiveTechnicians(): Promise<TechnicianOption[]> {
+  const all: TechnicianOption[] = [];
+  for (let page = 1; ; page++) {
+    const { data, meta } = await api.page<UserRow>(`/api/users?role=teknisi&approval_status=aktif&limit=100&page=${page}`);
+    all.push(...data.map((u) => ({ id: u.id, name: u.name, areas: u.areas })));
+    if (!meta || all.length >= meta.total || data.length === 0) return all;
+  }
+}
+
 export interface NewEmployee {
   name: string;
   username: string;
