@@ -4,15 +4,19 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/badge";
 import { TechnicianPicker } from "@/components/technician-picker";
 import { TelegramNotifyPanel } from "@/components/telegram-notify-panel";
+import { ApiError, errorMessage } from "@/lib/api";
+import { jakartaDay } from "@/lib/date";
+import { listActiveTechnicians, type TechnicianOption } from "@/lib/employees";
+import { listOffices, type OfficeRow } from "@/lib/offices";
 import {
-  getOffice,
-  isoDate,
-  offices,
-  schedules as initialSchedules,
-  technicians,
-} from "@/lib/mock-data";
+  cancelSchedule,
+  createSchedules,
+  listSchedules,
+  updateSchedule,
+  type ScheduleRow,
+} from "@/lib/schedules";
 import { AREA_LABEL } from "@/lib/types";
-import type { Area, MappingSchedule, ScheduleStatus } from "@/lib/types";
+import type { Area, ScheduleStatus } from "@/lib/types";
 
 const statusTone: Record<ScheduleStatus, "gray" | "info" | "green" | "red"> = {
   terjadwal: "gray",
@@ -23,52 +27,89 @@ const statusTone: Record<ScheduleStatus, "gray" | "info" | "green" | "red"> = {
 
 const AREAS = Object.keys(AREA_LABEL) as Area[];
 
-// Nama teknisi yang melayani area tertentu.
-const techniciansIn = (area: Area) =>
-  technicians.filter((t) => t.areas.includes(area)).map((t) => t.name);
-
-const isActive = (s: MappingSchedule) =>
-  s.status === "terjadwal" || s.status === "berjalan";
+const isActive = (s: ScheduleRow) => s.status === "terjadwal" || s.status === "berjalan";
 
 export function ScheduleManager() {
-  const [items, setItems] = useState<MappingSchedule[]>(initialSchedules);
+  const [items, setItems] = useState<ScheduleRow[] | null>(null);
+  const [offices, setOffices] = useState<OfficeRow[]>([]);
+  const [technicians, setTechnicians] = useState<TechnicianOption[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
+
   const [officeIds, setOfficeIds] = useState<number[]>([]);
   const [area, setArea] = useState<Area>("solo");
   const [date, setDate] = useState("");
-  const [technician, setTechnician] = useState("");
+  const [technician, setTechnician] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [filter, setFilter] = useState<ScheduleStatus | "semua">("semua");
-  const [techFilter, setTechFilter] = useState("semua"); // "semua" | "belum" | nama
+  const [techFilter, setTechFilter] = useState("semua"); // "semua" | "belum" | id teknisi
   const [areaFilter, setAreaFilter] = useState<Area | "semua">("semua");
   const [search, setSearch] = useState("");
+  const [query, setQuery] = useState(""); // search yang sudah ditunda, dipakai untuk memuat
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
   // Dihitung saat dipakai (bukan saat render awal) agar tidak ikut ter-prerender.
-  const today = () => isoDate(0);
+  const today = () => jakartaDay();
 
-  // Satu kantor tidak boleh punya dua jadwal aktif di tanggal yang sama.
-  function validate(office: number, day: string, ignoreId?: number): string | null {
-    if (!day) return "Tanggal wajib diisi.";
-    if (day < today()) return "Tanggal tidak boleh sebelum hari ini.";
-    const clash = items.some(
-      (s) =>
-        s.id !== ignoreId &&
-        isActive(s) &&
-        s.officeId === office &&
-        s.scheduledDate === day,
+  // Kantor dan teknisi dimuat sekali untuk formulir dan filter.
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([listOffices(), listActiveTechnicians()]).then(
+      ([o, t]) => {
+        if (cancelled) return;
+        setOffices(o);
+        setTechnicians(t);
+      },
+      (err) => !cancelled && setLoadError(errorMessage(err)),
     );
-    return clash ? "Kantor ini sudah punya jadwal aktif di tanggal tersebut." : null;
-  }
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Pencarian ditunda sebentar supaya tidak memanggil backend di setiap ketukan.
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // Daftar jadwal difilter di backend dan dimuat ulang setiap filter berubah.
+  useEffect(() => {
+    let cancelled = false;
+    listSchedules({
+      status: filter === "semua" ? undefined : filter,
+      area: areaFilter === "semua" ? undefined : areaFilter,
+      technician: techFilter === "semua" ? undefined : techFilter === "belum" ? "belum" : Number(techFilter),
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+      search: query || undefined,
+    }).then(
+      (rows) => {
+        if (cancelled) return;
+        setItems(rows);
+        setLoadError(null);
+      },
+      (err) => !cancelled && setLoadError(errorMessage(err)),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [filter, areaFilter, techFilter, dateFrom, dateTo, query, reloadKey]);
+
+  const reload = () => setReloadKey((k) => k + 1);
 
   function openModal() {
     setError(null);
     setArea("solo");
     setOfficeIds([]);
     setDate("");
-    setTechnician("");
+    setTechnician(null);
     setModalOpen(true);
   }
 
@@ -80,82 +121,93 @@ export function ScheduleManager() {
   useEffect(() => {
     if (!modalOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeModal();
+      if (e.key === "Escape") {
+        setModalOpen(false);
+        setError(null);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [modalOpen]);
 
+  // Kantor yang boleh dijadwalkan di area ini (kantor tanpa area boleh di mana pun).
+  const officesInArea = (a: Area) => offices.filter((o) => o.area === null || o.area === a);
+  const techniciansIn = (a: Area) => technicians.filter((t) => t.areas.includes(a));
+
   function changeArea(next: Area) {
     setArea(next);
-    // Teknisi yang tidak melayani area baru dilepas dari pilihan.
-    if (technician && !techniciansIn(next).includes(technician)) setTechnician("");
+    // Kantor dan teknisi yang tidak melayani area baru dilepas dari pilihan.
+    const allowed = new Set(officesInArea(next).map((o) => o.id));
+    setOfficeIds((cur) => cur.filter((id) => allowed.has(id)));
+    if (technician !== null && !techniciansIn(next).some((t) => t.id === technician)) setTechnician(null);
   }
 
   function toggleOffice(id: number) {
     setOfficeIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
   }
 
-  // Satu kali simpan = satu jadwal per kantor yang dipilih, semuanya untuk
-  // teknisi dan tanggal yang sama.
-  function handleAdd(e: React.FormEvent) {
+  // Satu kali simpan = satu jadwal per kantor yang dipilih, semuanya untuk teknisi dan tanggal yang sama.
+  // Backend menyimpannya atomik dan menolak kantor yang sudah punya jadwal aktif di tanggal itu.
+  async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     if (officeIds.length === 0) {
       setError("Pilih minimal satu kantor.");
       return;
     }
-    const problems = officeIds
-      .map((id) => ({ id, problem: validate(id, date) }))
-      .filter((x) => x.problem);
-    if (problems.length > 0) {
-      const names = problems.map((x) => getOffice(x.id)?.name).join(", ");
-      setError(
-        !date || date < today()
-          ? problems[0].problem
-          : `Sudah ada jadwal aktif di tanggal itu untuk: ${names}. Hapus centang kantor tersebut.`,
-      );
+    if (!date) {
+      setError("Tanggal wajib diisi.");
       return;
     }
-    setModalOpen(false);
+    if (date < today()) {
+      setError("Tanggal tidak boleh sebelum hari ini.");
+      return;
+    }
+    setSaving(true);
     setError(null);
-    setItems((prev) => {
-      let nextId = Math.max(0, ...prev.map((s) => s.id));
-      return [
-        ...prev,
-        ...officeIds.map((id) => ({
-          id: ++nextId,
-          officeId: id,
-          area,
-          scheduledDate: date,
-          assignedTo: technician || null,
-          status: "terjadwal" as const,
-        })),
-      ];
-    });
+    try {
+      const created = await createSchedules({ officeIds, area, scheduledDate: date, technicianId: technician });
+      setModalOpen(false);
+      setNotice(`${created.length} jadwal ditambahkan.`);
+      reload();
+    } catch (err) {
+      setError(
+        err instanceof ApiError && err.code === "SCHEDULE_CONFLICT"
+          ? `${err.message} Hapus centang kantor tersebut.`
+          : errorMessage(err),
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   // Mengembalikan pesan error, atau null jika berhasil disimpan.
-  function update(id: number, day: string, assignedTo: string | null): string | null {
-    const target = items.find((s) => s.id === id);
-    if (!target) return "Jadwal tidak ditemukan.";
-    const problem = validate(target.officeId, day, id);
-    if (problem) return problem;
-    setItems((prev) =>
-      prev.map((s) =>
-        s.id === id ? { ...s, scheduledDate: day, assignedTo } : s,
-      ),
-    );
+  async function update(id: number, day: string, technicianId: number | null): Promise<string | null> {
+    if (!day) return "Tanggal wajib diisi.";
+    if (day < today()) return "Tanggal tidak boleh sebelum hari ini.";
+    try {
+      await updateSchedule(id, { scheduledDate: day, technicianId });
+    } catch (err) {
+      return errorMessage(err);
+    }
     setEditingId(null);
+    setNotice(null);
+    reload();
     return null;
   }
 
-  function cancel(id: number) {
-    setItems((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, status: "dibatalkan" } : s)),
-    );
+  async function cancel(id: number) {
+    setBusyId(id);
+    setNotice(null);
+    try {
+      await cancelSchedule(id);
+      reload();
+    } catch (err) {
+      setNotice(errorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
   }
 
-  const keyword = search.trim().toLowerCase();
   const filtersActive =
     filter !== "semua" || areaFilter !== "semua" || techFilter !== "semua" || !!search || !!dateFrom || !!dateTo;
 
@@ -164,31 +216,34 @@ export function ScheduleManager() {
     setAreaFilter("semua");
     setTechFilter("semua");
     setSearch("");
+    setQuery("");
     setDateFrom("");
     setDateTo("");
   }
 
-  const sorted = items
-    .filter((s) => filter === "semua" || s.status === filter)
-    .filter((s) => areaFilter === "semua" || s.area === areaFilter)
-    .filter((s) => {
-      if (techFilter === "semua") return true;
-      if (techFilter === "belum") return s.assignedTo === null;
-      return s.assignedTo === techFilter;
-    })
-    .filter((s) => !dateFrom || s.scheduledDate >= dateFrom)
-    .filter((s) => !dateTo || s.scheduledDate <= dateTo)
-    .filter(
-      (s) =>
-        !keyword ||
-        (getOffice(s.officeId)?.name ?? "").toLowerCase().includes(keyword) ||
-        (s.assignedTo ?? "").toLowerCase().includes(keyword),
-    )
-    .sort((a, b) => b.scheduledDate.localeCompare(a.scheduledDate));
+  const shown = items ?? [];
+  const modalOffices = officesInArea(area);
 
   return (
     <div className="space-y-6">
-      <TelegramNotifyPanel schedules={items} />
+      <TelegramNotifyPanel refreshKey={reloadKey} />
+      {loadError && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          <p className="flex-1">Data jadwal tidak dapat dimuat. {loadError}</p>
+          <button
+            type="button"
+            onClick={reload}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
+          >
+            Coba lagi
+          </button>
+        </div>
+      )}
+      {notice && (
+        <p role="status" className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-800">
+          {notice}
+        </p>
+      )}
       <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <input
@@ -253,7 +308,7 @@ export function ScheduleManager() {
               <option value="semua">Semua</option>
               <option value="belum">Belum ditugaskan</option>
               {technicians.map((t) => (
-                <option key={t.name} value={t.name}>
+                <option key={t.id} value={t.id}>
                   {t.name}
                 </option>
               ))}
@@ -277,7 +332,7 @@ export function ScheduleManager() {
         </div>
         {filtersActive && (
           <div className="flex items-center justify-between text-sm text-slate-600">
-            <span>{sorted.length} jadwal ditampilkan</span>
+            <span>{shown.length} jadwal ditampilkan</span>
             <button
               type="button"
               onClick={resetFilters}
@@ -328,7 +383,7 @@ export function ScheduleManager() {
                   <button
                     type="button"
                     className="text-slate-700 underline-offset-2 hover:underline"
-                    onClick={() => setOfficeIds(offices.map((o) => o.id))}
+                    onClick={() => setOfficeIds(modalOffices.map((o) => o.id))}
                   >
                     Pilih semua
                   </button>
@@ -342,7 +397,10 @@ export function ScheduleManager() {
                 </div>
               </div>
               <ul className="mt-1 max-h-48 divide-y divide-slate-100 overflow-y-auto rounded-md border border-slate-300">
-                {offices.map((o) => (
+                {modalOffices.length === 0 && (
+                  <li className="px-3 py-2 text-sm text-slate-500">Tidak ada kantor di area {AREA_LABEL[area]}.</li>
+                )}
+                {modalOffices.map((o) => (
                   <li key={o.id}>
                     <label className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm font-normal hover:bg-slate-50">
                       <input
@@ -386,9 +444,10 @@ export function ScheduleManager() {
               </button>
               <button
                 type="submit"
-                className="rounded-md bg-slate-800 px-4 py-2 font-medium text-white hover:bg-slate-900"
+                disabled={saving}
+                className="rounded-md bg-slate-800 px-4 py-2 font-medium text-white hover:bg-slate-900 disabled:opacity-60"
               >
-                {officeIds.length > 1 ? `Simpan ${officeIds.length} jadwal` : "Simpan jadwal"}
+                {saving ? "Menyimpan…" : officeIds.length > 1 ? `Simpan ${officeIds.length} jadwal` : "Simpan jadwal"}
               </button>
             </div>
           </form>
@@ -408,19 +467,27 @@ export function ScheduleManager() {
             </tr>
           </thead>
           <tbody>
-            {sorted.length === 0 && (
+            {items === null && !loadError && (
+              <tr>
+                <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
+                  Memuat jadwal…
+                </td>
+              </tr>
+            )}
+            {items !== null && shown.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
                   Tidak ada jadwal yang cocok.
                 </td>
               </tr>
             )}
-            {sorted.map((s) =>
+            {shown.map((s) =>
               editingId === s.id ? (
                 <EditRow
                   key={s.id}
                   schedule={s}
                   min={today()}
+                  options={techniciansIn(s.area)}
                   onSave={update}
                   onClose={() => setEditingId(null)}
                 />
@@ -428,7 +495,7 @@ export function ScheduleManager() {
                 <tr key={s.id} className="border-t border-slate-100">
                   <td className="px-4 py-2">{s.scheduledDate}</td>
                   <td className="px-4 py-2">{AREA_LABEL[s.area]}</td>
-                  <td className="px-4 py-2">{getOffice(s.officeId)?.name}</td>
+                  <td className="px-4 py-2">{s.officeName}</td>
                   <td className="px-4 py-2">{s.assignedTo ?? "-"}</td>
                   <td className="px-4 py-2">
                     <Badge tone={statusTone[s.status]}>{s.status}</Badge>
@@ -445,8 +512,9 @@ export function ScheduleManager() {
                         </button>
                         <button
                           type="button"
+                          disabled={busyId === s.id}
                           onClick={() => cancel(s.id)}
-                          className="text-red-700 hover:underline"
+                          className="text-red-700 hover:underline disabled:opacity-60"
                         >
                           Batalkan
                         </button>
@@ -466,17 +534,26 @@ export function ScheduleManager() {
 function EditRow({
   schedule,
   min,
+  options,
   onSave,
   onClose,
 }: {
-  schedule: MappingSchedule;
+  schedule: ScheduleRow;
   min: string;
-  onSave: (id: number, day: string, assignedTo: string | null) => string | null;
+  options: TechnicianOption[];
+  onSave: (id: number, day: string, technicianId: number | null) => Promise<string | null>;
   onClose: () => void;
 }) {
   const [day, setDay] = useState(schedule.scheduledDate);
-  const [tech, setTech] = useState(schedule.assignedTo ?? "");
+  const [tech, setTech] = useState<number | null>(schedule.assignedToId);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    setError(await onSave(schedule.id, day, tech));
+    setSaving(false);
+  }
 
   return (
     <tr className="border-t border-slate-100 bg-slate-50">
@@ -490,13 +567,9 @@ function EditRow({
         />
       </td>
       <td className="px-4 py-2">{AREA_LABEL[schedule.area]}</td>
-      <td className="px-4 py-2">{getOffice(schedule.officeId)?.name}</td>
+      <td className="px-4 py-2">{schedule.officeName}</td>
       <td className="px-4 py-2">
-        <TechnicianPicker
-          value={tech}
-          options={techniciansIn(schedule.area)}
-          onChange={setTech}
-        />
+        <TechnicianPicker value={tech} options={options} onChange={setTech} />
         {error && <p className="mt-1 text-xs text-red-700">{error}</p>}
       </td>
       <td className="px-4 py-2">
@@ -505,16 +578,13 @@ function EditRow({
       <td className="space-x-3 px-4 py-2 text-right">
         <button
           type="button"
-          onClick={() => setError(onSave(schedule.id, day, tech || null))}
-          className="text-slate-700 underline-offset-2 hover:underline"
+          disabled={saving}
+          onClick={save}
+          className="text-slate-700 underline-offset-2 hover:underline disabled:opacity-60"
         >
-          Simpan
+          {saving ? "Menyimpan…" : "Simpan"}
         </button>
-        <button
-          type="button"
-          onClick={onClose}
-          className="text-slate-600 hover:underline"
-        >
+        <button type="button" onClick={onClose} className="text-slate-600 hover:underline">
           Batal
         </button>
       </td>

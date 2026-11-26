@@ -1,13 +1,15 @@
 "use client";
 
-import { useMapping } from "@/components/mapping-provider";
+import { useTechnicianOffices } from "@/components/technician-provider";
 
 export function TechnicianHero({ name }: { name: string }) {
-  const { assets } = useMapping();
-  const done = assets.filter((a) => a.mappingStatus === "sudah").length;
-  const left = assets.filter((a) => a.mappingStatus === "belum").length;
-  const percent =
-    assets.length === 0 ? 0 : Math.round((done / assets.length) * 100);
+  // Progres dihitung dari seluruh aset di kantor-kantor teknisi ini.
+  const { offices } = useTechnicianOffices();
+  const list = offices ?? [];
+  const total = list.reduce((n, o) => n + o.total, 0);
+  const done = list.reduce((n, o) => n + o.sudah, 0);
+  const left = list.reduce((n, o) => n + o.belum, 0);
+  const percent = total === 0 ? 0 : Math.round((done / total) * 100);
   const initials = name
     .split(" ")
     .map((w) => w[0])
@@ -35,7 +37,7 @@ export function TechnicianHero({ name }: { name: string }) {
             <span className="text-xl font-semibold">%</span>
           </p>
           <p className="text-right text-xs text-white/85">
-            {done} dari {assets.length} aset termapping
+            {done} dari {total} aset termapping
             <br />
             {left} menunggu validasi
           </p>

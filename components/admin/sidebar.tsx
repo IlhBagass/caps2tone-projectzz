@@ -1,15 +1,16 @@
-import Link from "next/link";
 import { connection } from "next/server";
 import { NavLink } from "@/components/nav-link";
 import {
   AssetIcon,
   CalendarIcon,
   DashboardIcon,
+  InventoryIcon,
   LogoutIcon,
   ReportIcon,
   UsersIcon,
 } from "@/components/admin/icons";
 import { getTodaySchedules } from "@/lib/admin-dashboard";
+import { LogoutButton } from "@/components/logout-button";
 import { getCurrentUser } from "@/lib/session";
 
 function Group({ label, children }: { label: string; children: React.ReactNode }) {
@@ -38,7 +39,10 @@ export function SidebarSkeleton() {
 export async function AdminSidebar() {
   await connection();
   const user = await getCurrentUser();
-  const jadwalHariIni = getTodaySchedules().filter((s) => s.status !== "dibatalkan").length;
+  // Lencana jumlah jadwal hari ini; bila backend tidak terjangkau, menu tetap tampil tanpa lencana.
+  const jadwalHariIni = await getTodaySchedules()
+    .then((list) => list.filter((s) => s.status !== "dibatalkan").length)
+    .catch(() => 0);
   const name = user?.name ?? "Admin";
 
   return (
@@ -59,6 +63,9 @@ export async function AdminSidebar() {
             </NavLink>
             <NavLink href="/admin/aset" icon={<AssetIcon />}>
               Data Aset
+            </NavLink>
+            <NavLink href="/admin/inventaris" icon={<InventoryIcon />}>
+              Inventaris
             </NavLink>
           </Group>
           <Group label="Pengaturan">
@@ -83,13 +90,10 @@ export async function AdminSidebar() {
               </span>
             </span>
           </div>
-          <Link
-            href="/login"
-            className="mt-2 flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-          >
+          <LogoutButton className="mt-2 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-60">
             <LogoutIcon />
             Keluar
-          </Link>
+          </LogoutButton>
         </div>
       </nav>
 
@@ -105,6 +109,9 @@ export async function AdminSidebar() {
         </NavLink>
         <NavLink href="/admin/aset" icon={<AssetIcon />}>
           Data Aset
+        </NavLink>
+        <NavLink href="/admin/inventaris" icon={<InventoryIcon />}>
+          Inventaris
         </NavLink>
         <NavLink href="/admin/laporan" icon={<ReportIcon />}>
           Laporan

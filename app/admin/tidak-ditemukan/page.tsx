@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { connection } from "next/server";
-import { getNotFoundScans } from "@/lib/admin-dashboard";
-import { offices } from "@/lib/mock-data";
+import { LoadError } from "@/components/admin/load-error";
+import { getNotFoundScans, getOfficeOptions } from "@/lib/admin-dashboard";
+import { errorMessage } from "@/lib/api";
 import { requireAdmin } from "@/lib/session";
 
 const field = "mt-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm";
@@ -46,7 +47,13 @@ async function Results({
   const officeId = Number(one(params.kantor)) || undefined;
   const from = one(params.dari);
   const to = one(params.sampai);
-  const { rows, filter } = getNotFoundScans({ officeId, from, to });
+  let data;
+  try {
+    data = await Promise.all([getNotFoundScans({ officeId, from, to }), getOfficeOptions()]);
+  } catch (err) {
+    return <LoadError message={errorMessage(err)} />;
+  }
+  const [{ rows, filter }, offices] = data;
   const filtered = Boolean(filter.officeId || filter.from || filter.to);
 
   return (

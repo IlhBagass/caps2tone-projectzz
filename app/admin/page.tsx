@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { Badge } from "@/components/badge";
+import { LoadError } from "@/components/admin/load-error";
 import { OfficeProgressTable } from "@/components/admin/office-progress-table";
 import {
   getAssetSummary,
@@ -9,6 +10,7 @@ import {
   getTodayResults,
   getTodaySchedules,
 } from "@/lib/admin-dashboard";
+import { errorMessage } from "@/lib/api";
 import { requireAdmin } from "@/lib/session";
 import type { ScheduleStatus } from "@/lib/types";
 
@@ -38,11 +40,13 @@ async function Dashboard() {
   await connection();
   await requireAdmin();
 
-  const summary = getAssetSummary();
-  const todaySchedules = getTodaySchedules();
-  const todayResults = getTodayResults();
-
-  const officeRows = getOfficeProgress();
+  let data;
+  try {
+    data = await Promise.all([getAssetSummary(), getTodaySchedules(), getTodayResults(), getOfficeProgress()]);
+  } catch (err) {
+    return <LoadError message={errorMessage(err)} />;
+  }
+  const [summary, todaySchedules, todayResults, officeRows] = data;
 
   return (
     <div className="space-y-6">

@@ -1,19 +1,25 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { errorMessage } from "@/lib/api";
+import { uploadPhoto } from "@/lib/photos";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 
-// Foto bukti validasi: bisa diambil langsung dari kamera atau diunggah dari
-// galeri. Foto hanya disimpan di memori browser (object URL); penyimpanan
-// permanen (misalnya Cloudinary) masih [TBD].
+// Foto bukti validasi: bisa diambil langsung dari kamera atau diunggah dari galeri.
+// Foto langsung diunggah ke Cloudinary (tanda tangan dari backend, butuh scheduleId aktif);
+// onChange menerima URL Cloudinary-nya, yang dikirim ke backend saat menyimpan scan.
 export function PhotoInput({
   value,
   onChange,
+  scheduleId,
 }: {
   value: string | null;
   onChange: (url: string | null) => void;
+  scheduleId: number | null;
 }) {
+  const [preview, setPreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const fallbackCameraRef = useRef<HTMLInputElement>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -60,9 +66,27 @@ export function PhotoInput({
     };
   }, [cameraOpen]);
 
-  function setPhoto(url: string) {
-    if (value) URL.revokeObjectURL(value);
-    onChange(url);
+  // Tampilkan pratinjau lokal seketika, unggah di latar, lalu serahkan URL Cloudinary ke induk.
+  async function accept(blob: Blob) {
+    if (scheduleId === null) {
+      setError("Foto hanya bisa diunggah pada jadwal aktif hari ini.");
+      return;
+    }
+    const local = URL.createObjectURL(blob);
+    setPreview(local);
+    setUploading(true);
+    setError(null);
+    try {
+      onChange(await uploadPhoto(blob, scheduleId));
+    } catch (err) {
+      setError(
+        errorMessage(err, { CLOUDINARY_NOT_CONFIGURED: "Penyimpanan foto belum dikonfigurasi di server." }),
+      );
+    } finally {
+      URL.revokeObjectURL(local);
+      setPreview(null);
+      setUploading(false);
+    }
   }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -77,8 +101,7 @@ export function PhotoInput({
       setError("Ukuran foto maksimal 5 MB.");
       return;
     }
-    setError(null);
-    setPhoto(URL.createObjectURL(file));
+    void accept(file);
   }
 
   function takePicture() {
@@ -94,9 +117,8 @@ export function PhotoInput({
           setError("Gagal mengambil foto. Coba lagi.");
           return;
         }
-        setError(null);
-        setPhoto(URL.createObjectURL(blob));
         setCameraOpen(false);
+        void accept(blob);
       },
       "image/jpeg",
       0.85,
@@ -104,9 +126,10 @@ export function PhotoInput({
   }
 
   function handleRemove() {
-    if (value) URL.revokeObjectURL(value);
     onChange(null);
   }
+
+  const shown = value ?? preview;
 
   return (
     <div className="space-y-2">
@@ -141,21 +164,27 @@ export function PhotoInput({
             </button>
           </div>
         </div>
-      ) : value ? (
+      ) : shown ? (
         <div className="space-y-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={value}
+            src={shown}
             alt="Foto validasi aset"
             className="max-h-56 w-full rounded-md border border-slate-300 object-contain"
           />
-          <button
-            type="button"
-            onClick={handleRemove}
-            className="text-sm text-red-700 hover:underline"
-          >
-            Hapus foto
-          </button>
+          {uploading ? (
+            <p role="status" className="text-sm text-slate-600">
+              Mengunggah foto…
+            </p>
+          ) : (
+            <button
+              type="button"
+              onClick={handleRemove}
+              className="text-sm text-red-700 hover:underline"
+            >
+              Hapus foto
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-2">

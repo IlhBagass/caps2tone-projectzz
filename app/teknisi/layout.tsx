@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { BrandMark } from "@/components/brand-mark";
-import { MappingProvider } from "@/components/mapping-provider";
+import { LogoutButton } from "@/components/logout-button";
+import { TechnicianProvider } from "@/components/technician-provider";
 
 export default function TeknisiLayout({ children }: LayoutProps<"/teknisi">) {
   return (
@@ -11,16 +12,11 @@ export default function TeknisiLayout({ children }: LayoutProps<"/teknisi">) {
           <Link href="/teknisi" aria-label="Beranda teknisi">
             <BrandMark />
           </Link>
-          <Link
-            href="/login"
-            className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:border-sky-600 hover:text-sky-700"
-          >
-            Keluar
-          </Link>
+          <LogoutButton className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:border-sky-600 hover:text-sky-700 disabled:opacity-60" />
         </div>
       </header>
       <main className="flex-1 px-4 py-5">
-        <MappingProvider>{children}</MappingProvider>
+        <TechnicianProvider>{children}</TechnicianProvider>
       </main>
       <footer className="border-t border-slate-200 bg-white px-4 py-3 text-center text-[11px] text-slate-500">
         Sistem Mapping Aset · Telkom Infrastruktur Indonesia

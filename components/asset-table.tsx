@@ -1,39 +1,31 @@
 "use client";
 
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/badge";
+import { errorMessage } from "@/lib/api";
+import { downloadTemplate } from "@/lib/asset-excel";
 import {
-  applyImport,
-  downloadTemplate,
   exportAssets,
-  parseAssetFile,
-  type ImportError,
-  type ParseResult,
-} from "@/lib/asset-excel";
-import {
-  appendHistory,
-  setAssets,
-  updateAsset,
-  useAssetStore,
-} from "@/lib/asset-store";
-import { currentTechnician, getOffice, offices } from "@/lib/mock-data";
+  getAssetHistory,
+  importAssetsFile,
+  importProblems,
+  listAssets,
+  rejectAsset,
+  type AdminAsset,
+  type AssetSortKey,
+  type ImportProblem,
+  type ImportSummary,
+} from "@/lib/assets";
+import { listOffices } from "@/lib/offices";
 import { displayAssetValue, UNKNOWN_VALUE } from "@/lib/types";
+import type { AssetHistory } from "@/lib/types";
 
 const btn =
   "rounded-md border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50";
 
-type SortKey =
-  | "eq"
-  | "kind"
-  | "serialNumber"
-  | "office"
-  | "ref"
-  | "status"
-  | "kondisi"
-  | "labelStatus"
-  | "labelCode";
+const PAGE_SIZE = 25;
 
-const columns: { key: SortKey; label: string }[] = [
+const columns: { key: AssetSortKey; label: string }[] = [
   { key: "eq", label: "EQ" },
   { key: "kind", label: "Jenis" },
   { key: "serialNumber", label: "Serial" },
@@ -45,32 +37,82 @@ const columns: { key: SortKey; label: string }[] = [
   { key: "labelCode", label: "Kode label" },
 ];
 
+interface ImportPreview {
+  name: string;
+  file: File;
+  /** Hasil dry run: tidak ada baris bermasalah. */
+  summary: ImportSummary | null;
+  problems: ImportProblem[];
+}
+
+interface HistoryState {
+  loading: boolean;
+  rows: AssetHistory[];
+  error: string | null;
+}
+
 export function AssetTable() {
-  // Sementara di memori browser (dibagi dengan halaman teknisi). Ganti dengan
-  // API saat database siap.
-  const { assets, history } = useAssetStore();
+  const [rows, setRows] = useState<AdminAsset[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState(""); // pencarian yang sudah ditunda, dipakai untuk memuat
+  const [sort, setSort] = useState<{ key: AssetSortKey; dir: "asc" | "desc" } | null>(null);
+
   const [photoOpen, setPhotoOpen] = useState<{ src: string; title: string } | null>(null);
   const [rejecting, setRejecting] = useState<{ id: number; eq: string } | null>(null);
   const [reason, setReason] = useState("");
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" } | null>(null);
+  const [rejectError, setRejectError] = useState<string | null>(null);
+  const [rejectBusy, setRejectBusy] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
+  const [histories, setHistories] = useState<Record<number, HistoryState>>({});
   const [busy, setBusy] = useState(false);
-  const [preview, setPreview] = useState<(ParseResult & { name: string }) | null>(null);
-  const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string; details?: ImportError[] } | null>(null);
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string; details?: ImportProblem[] } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Pencarian ditunda sebentar dan mengembalikan ke halaman pertama.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setQuery(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // Daftar dimuat dari backend (cari, urut, dan halaman dijalankan di server).
+  useEffect(() => {
+    let cancelled = false;
+    listAssets({ search: query || undefined, page, limit: PAGE_SIZE, sort }).then(
+      (result) => {
+        if (cancelled) return;
+        setRows(result.rows);
+        setTotal(result.total);
+        setLoadError(null);
+      },
+      (err) => !cancelled && setLoadError(errorMessage(err)),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [query, page, sort, reloadKey]);
+
+  const reload = () => setReloadKey((k) => k + 1);
 
   async function run(task: () => Promise<void>) {
     setBusy(true);
     try {
       await task();
-    } catch {
-      setNotice({ tone: "error", text: "Terjadi kesalahan saat memproses file Excel." });
+    } catch (err) {
+      setNotice({ tone: "error", text: errorMessage(err, {}, "Terjadi kesalahan saat memproses file Excel.") });
     } finally {
       setBusy(false);
     }
   }
 
+  // Pratinjau impor = dry run di backend: semua aturan dijalankan, tetapi tidak ada yang disimpan.
   function onPickFile(file: File | undefined) {
     if (fileRef.current) fileRef.current.value = "";
     if (!file) return;
@@ -80,83 +122,94 @@ export function AssetTable() {
       return;
     }
     void run(async () => {
-      setPreview({ ...(await parseAssetFile(file, offices)), name: file.name });
+      try {
+        setPreview({ name: file.name, file, summary: await importAssetsFile(file, true), problems: [] });
+      } catch (err) {
+        const problems = importProblems(err);
+        if (!problems) throw err;
+        setPreview({ name: file.name, file, summary: null, problems });
+      }
     });
   }
 
   function confirmImport() {
     if (!preview) return;
-    const res = applyImport(assets, preview.rows, currentTechnician, history.length + 1);
-    setAssets(res.assets);
-    appendHistory(res.newHistory);
-    setNotice({
-      tone: "ok",
-      text: `Impor selesai: ${res.added} aset baru, ${res.updated} diperbarui, ${preview.errors.length} baris dilewati.`,
-      details: res.warnings,
+    const { file } = preview;
+    void run(async () => {
+      try {
+        const done = await importAssetsFile(file, false);
+        setNotice({ tone: "ok", text: `Impor selesai: ${done.created} aset baru, ${done.updated} diperbarui.` });
+        setPreview(null);
+        reload();
+      } catch (err) {
+        const problems = importProblems(err);
+        if (!problems) throw err;
+        setPreview({ name: file.name, file, summary: null, problems });
+      }
     });
-    setPreview(null);
   }
 
   // Mapping yang ditolak dikembalikan ke "belum" supaya teknisi mengulang.
   // Foto dan kode label lama dipertahankan sebagai bahan tinjauan.
-  function confirmReject() {
+  async function confirmReject() {
     const text = reason.trim();
     if (!rejecting || !text) return;
-    updateAsset(rejecting.id, {
-      mappingStatus: "belum",
-      rejection: { reason: text, rejectedBy: "Admin", rejectedAt: new Date().toISOString() },
-    });
-    setRejecting(null);
-    setReason("");
-    setNotice({ tone: "ok", text: `Mapping ${rejecting.eq} ditolak dan dikembalikan ke teknisi.` });
+    setRejectBusy(true);
+    setRejectError(null);
+    try {
+      await rejectAsset(rejecting.id, text);
+      setNotice({ tone: "ok", text: `Mapping ${rejecting.eq} ditolak dan dikembalikan ke teknisi.` });
+      setRejecting(null);
+      setReason("");
+      reload();
+    } catch (err) {
+      setRejectError(errorMessage(err, { NOT_MAPPED: "Hanya mapping yang sudah selesai yang dapat ditolak." }));
+    } finally {
+      setRejectBusy(false);
+    }
   }
 
-  const q = query.trim().toLowerCase();
-  const filtered = assets.filter(
-    (a) =>
-      !q ||
-      a.eq.toLowerCase().includes(q) ||
-      a.serialNumber.toLowerCase().includes(q) ||
-      a.assetCode.toLowerCase().includes(q),
-  );
-
-  function sortValue(a: (typeof assets)[number], key: SortKey): string {
-    if (key === "office") return getOffice(a.officeId)?.name ?? "";
-    if (key === "status" || key === "kondisi") return displayAssetValue(a, a[key]);
-    return String(a[key] ?? "");
-  }
-
-  const sorted = sort
-    ? [...filtered].sort((x, y) => {
-        const r = sortValue(x, sort.key).localeCompare(sortValue(y, sort.key), "id", {
-          numeric: true,
-          sensitivity: "base",
-        });
-        return sort.dir === "asc" ? r : -r;
-      })
-    : filtered;
-
-  function toggleSort(key: SortKey) {
-    setSort((s) =>
-      !s || s.key !== key
-        ? { key, dir: "asc" }
-        : s.dir === "asc"
-          ? { key, dir: "desc" }
-          : null,
+  function toggleHistory(assetId: number) {
+    if (openId === assetId) {
+      setOpenId(null);
+      return;
+    }
+    setOpenId(assetId);
+    setHistories((h) => ({ ...h, [assetId]: { loading: true, rows: [], error: null } }));
+    getAssetHistory(assetId).then(
+      (list) => setHistories((h) => ({ ...h, [assetId]: { loading: false, rows: list, error: null } })),
+      (err) => setHistories((h) => ({ ...h, [assetId]: { loading: false, rows: [], error: errorMessage(err) } })),
     );
   }
+
+  function toggleSort(key: AssetSortKey) {
+    setSort((s) =>
+      !s || s.key !== key ? { key, dir: "asc" } : s.dir === "asc" ? { key, dir: "desc" } : null,
+    );
+    setPage(1);
+  }
+
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const first = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const last = Math.min(page * PAGE_SIZE, total);
+  const shown = rows ?? [];
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
           placeholder="Cari EQ, serial number, atau kode aset"
           className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 sm:max-w-sm"
         />
         <div className="flex flex-wrap gap-2 sm:ml-auto">
-          <button type="button" className={btn} disabled={busy} onClick={() => void run(() => downloadTemplate(offices))}>
+          <button
+            type="button"
+            className={btn}
+            disabled={busy}
+            onClick={() => void run(async () => downloadTemplate(await listOffices()))}
+          >
             Unduh template
           </button>
           <button type="button" className={btn} disabled={busy} onClick={() => fileRef.current?.click()}>
@@ -165,10 +218,10 @@ export function AssetTable() {
           <button
             type="button"
             className={btn}
-            disabled={busy || filtered.length === 0}
-            onClick={() => void run(() => exportAssets(filtered, offices))}
+            disabled={busy || total === 0}
+            onClick={() => void run(() => exportAssets(query || undefined))}
           >
-            Ekspor Excel{q ? " (hasil cari)" : ""}
+            Ekspor Excel{query ? " (hasil cari)" : ""}
           </button>
           <input
             ref={fileRef}
@@ -179,6 +232,15 @@ export function AssetTable() {
           />
         </div>
       </div>
+
+      {loadError && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          <p className="flex-1">Data aset tidak dapat dimuat. {loadError}</p>
+          <button type="button" className={btn} onClick={reload}>
+            Coba lagi
+          </button>
+        </div>
+      )}
 
       {notice && (
         <div
@@ -203,20 +265,26 @@ export function AssetTable() {
       {preview && (
         <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-4 text-sm">
           <p className="font-medium">Pratinjau impor: {preview.name}</p>
-          <p>
-            {preview.rows.length} baris valid, {preview.errors.length} baris bermasalah.
-            Aset dengan EQ yang sudah ada akan diperbarui.
-          </p>
-          {preview.errors.length > 0 && (
+          {preview.summary ? (
+            <p>
+              {preview.summary.total} baris valid: {preview.summary.created} aset baru dan {preview.summary.updated}{" "}
+              diperbarui. Aset dengan EQ yang sudah ada akan diperbarui.
+            </p>
+          ) : (
+            <p className="text-red-700">
+              {preview.problems.length} baris bermasalah. Tidak ada yang disimpan; perbaiki file lalu impor ulang.
+            </p>
+          )}
+          {preview.problems.length > 0 && (
             <ul className="max-h-40 list-disc overflow-y-auto pl-5 text-red-700">
-              {preview.errors.map((e, i) => (
+              {preview.problems.map((e, i) => (
                 <li key={i}>{e.line ? `Baris ${e.line}: ` : ""}{e.message}</li>
               ))}
             </ul>
           )}
           <div className="flex gap-2">
-            <button type="button" className={btn} disabled={preview.rows.length === 0} onClick={confirmImport}>
-              Impor {preview.rows.length} baris
+            <button type="button" className={btn} disabled={busy || !preview.summary} onClick={confirmImport}>
+              {busy ? "Mengimpor…" : preview.summary ? `Impor ${preview.summary.total} baris` : "Impor"}
             </button>
             <button type="button" className={btn} onClick={() => setPreview(null)}>
               Batal
@@ -225,7 +293,7 @@ export function AssetTable() {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+      <div className="@container overflow-x-auto rounded-xl border border-slate-200 bg-white">
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 text-slate-600">
             <tr>
@@ -234,11 +302,7 @@ export function AssetTable() {
                   key={c.key}
                   className="px-4 py-2 font-medium"
                   aria-sort={
-                    sort?.key === c.key
-                      ? sort.dir === "asc"
-                        ? "ascending"
-                        : "descending"
-                      : "none"
+                    sort?.key === c.key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"
                   }
                 >
                   <button
@@ -247,10 +311,7 @@ export function AssetTable() {
                     className="inline-flex items-center gap-1 hover:text-slate-900"
                   >
                     {c.label}
-                    <span
-                      aria-hidden
-                      className={sort?.key === c.key ? "text-slate-900" : "text-slate-400"}
-                    >
+                    <span aria-hidden className={sort?.key === c.key ? "text-slate-900" : "text-slate-400"}>
                       {sort?.key === c.key ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}
                     </span>
                   </button>
@@ -261,22 +322,29 @@ export function AssetTable() {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 && (
+            {rows === null && !loadError && (
+              <tr>
+                <td colSpan={11} className="px-4 py-6 text-center text-slate-600">
+                  Memuat data aset…
+                </td>
+              </tr>
+            )}
+            {rows !== null && shown.length === 0 && (
               <tr>
                 <td colSpan={11} className="px-4 py-6 text-center text-slate-600">
                   Tidak ada aset yang cocok.
                 </td>
               </tr>
             )}
-            {sorted.map((a) => {
-              const rows = history.filter((h) => h.assetId === a.id);
+            {shown.map((a) => {
+              const history = histories[a.id];
               return (
                 <Fragment key={a.id}>
                   <tr className="border-t border-slate-100">
                     <td className="px-4 py-2 font-medium">{a.eq}</td>
                     <td className="px-4 py-2">{a.kind === "chassis" ? "Chassis" : "Modul"}</td>
                     <td className="px-4 py-2 font-mono">{a.serialNumber}</td>
-                    <td className="px-4 py-2">{getOffice(a.officeId)?.name}</td>
+                    <td className="px-4 py-2">{a.officeName}</td>
                     <td className="px-4 py-2">{a.ref}</td>
                     <td className="px-4 py-2">
                       <UnknownAware value={displayAssetValue(a, a.status)} />
@@ -285,9 +353,7 @@ export function AssetTable() {
                       <UnknownAware value={displayAssetValue(a, a.kondisi)} />
                     </td>
                     <td className="px-4 py-2">
-                      <Badge tone={a.labelStatus === "terpasang" ? "green" : "gray"}>
-                        {a.labelStatus}
-                      </Badge>
+                      <Badge tone={a.labelStatus === "terpasang" ? "green" : "gray"}>{a.labelStatus}</Badge>
                     </td>
                     <td className="px-4 py-2 font-mono">{a.labelCode ?? "-"}</td>
                     <td className="px-4 py-2">
@@ -319,6 +385,7 @@ export function AssetTable() {
                           type="button"
                           onClick={() => {
                             setReason("");
+                            setRejectError(null);
                             setRejecting({ id: a.id, eq: a.eq });
                           }}
                           className="text-red-700 underline-offset-2 hover:underline"
@@ -328,7 +395,7 @@ export function AssetTable() {
                       )}
                       <button
                         type="button"
-                        onClick={() => setOpenId(openId === a.id ? null : a.id)}
+                        onClick={() => toggleHistory(a.id)}
                         className="text-slate-700 underline-offset-2 hover:underline"
                       >
                         Riwayat
@@ -338,33 +405,37 @@ export function AssetTable() {
                   {a.rejection && a.mappingStatus !== "sudah" && (
                     <tr className="bg-red-50">
                       <td colSpan={11} className="px-4 py-2 text-red-800">
-                        <b>Mapping ditolak</b> oleh {a.rejection.rejectedBy},{" "}
-                        {new Date(a.rejection.rejectedAt).toLocaleString("id-ID")}.{" "}
-                        <b>Alasan:</b> {a.rejection.reason}
+                        <div className="sticky left-0 w-[calc(100cqw-2rem)]">
+                          <b>Mapping ditolak</b> oleh {a.rejection.rejectedBy},{" "}
+                          {new Date(a.rejection.rejectedAt).toLocaleString("id-ID")}. <b>Alasan:</b> {a.rejection.reason}
+                        </div>
                       </td>
                     </tr>
                   )}
                   {openId === a.id && (
                     <tr key={`${a.id}-history`} className="bg-slate-50">
                       <td colSpan={11} className="px-4 py-3">
-                        {rows.length === 0 ? (
-                          <p className="text-slate-600">
-                            Belum ada riwayat perubahan.
-                          </p>
-                        ) : (
-                          <ul className="space-y-1">
-                            {rows.map((h) => (
-                              <li key={h.id}>
-                                <b>{h.field.toUpperCase()}</b>: {h.oldValue} →{" "}
-                                {h.newValue}{" "}
-                                <span className="text-slate-500">
-                                  oleh {h.changedBy},{" "}
-                                  {new Date(h.changedAt).toLocaleString("id-ID")}
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
+                        {/* Tabel bisa lebih lebar dari layar; riwayat menempel di tepi kiri area yang terlihat. */}
+                        <div className="sticky left-0 w-[calc(100cqw-2rem)]">
+                          {!history || history.loading ? (
+                            <p className="text-slate-600">Memuat riwayat…</p>
+                          ) : history.error ? (
+                            <p className="text-red-700">Riwayat tidak dapat dimuat. {history.error}</p>
+                          ) : history.rows.length === 0 ? (
+                            <p className="text-slate-600">Belum ada riwayat perubahan.</p>
+                          ) : (
+                            <ul className="space-y-1">
+                              {history.rows.map((h) => (
+                                <li key={h.id}>
+                                  <b>{h.field.toUpperCase()}</b>: {h.oldValue} → {h.newValue}{" "}
+                                  <span className="text-slate-500">
+                                    oleh {h.changedBy}, {new Date(h.changedAt).toLocaleString("id-ID")}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )}
@@ -375,6 +446,21 @@ export function AssetTable() {
         </table>
       </div>
 
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
+        <span>{total === 0 ? "0 aset" : `Menampilkan ${first}–${last} dari ${total} aset`}</span>
+        <div className="flex items-center gap-2">
+          <button type="button" className={btn} disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+            Sebelumnya
+          </button>
+          <span>
+            Halaman {page} dari {pageCount}
+          </span>
+          <button type="button" className={btn} disabled={page >= pageCount} onClick={() => setPage((p) => p + 1)}>
+            Berikutnya
+          </button>
+        </div>
+      </div>
+
       {rejecting && (
         <div
           role="dialog"
@@ -383,14 +469,10 @@ export function AssetTable() {
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
           onClick={() => setRejecting(null)}
         >
-          <div
-            className="w-full max-w-md space-y-3 rounded-xl bg-white p-4 text-sm"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="w-full max-w-md space-y-3 rounded-xl bg-white p-4 text-sm" onClick={(e) => e.stopPropagation()}>
             <p className="font-medium">Tolak mapping {rejecting.eq}</p>
             <p className="text-slate-600">
-              Aset dikembalikan ke status belum dimapping dan teknisi diminta
-              mengulang.
+              Aset dikembalikan ke status belum dimapping dan teknisi diminta mengulang.
             </p>
             <label className="block font-medium">
               Alasan penolakan
@@ -398,22 +480,24 @@ export function AssetTable() {
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 rows={3}
+                maxLength={500}
                 autoFocus
                 placeholder="Contoh: foto buram, kode label tidak sesuai"
                 className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
               />
             </label>
+            {rejectError && <p className="text-red-700">{rejectError}</p>}
             <div className="flex justify-end gap-2">
               <button type="button" className={btn} onClick={() => setRejecting(null)}>
                 Batal
               </button>
               <button
                 type="button"
-                disabled={!reason.trim()}
-                onClick={confirmReject}
+                disabled={!reason.trim() || rejectBusy}
+                onClick={() => void confirmReject()}
                 className="rounded-md bg-red-600 px-3 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-50"
               >
-                Tolak mapping
+                {rejectBusy ? "Menolak…" : "Tolak mapping"}
               </button>
             </div>
           </div>
@@ -428,10 +512,7 @@ export function AssetTable() {
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
           onClick={() => setPhotoOpen(null)}
         >
-          <div
-            className="max-h-full max-w-3xl space-y-2 rounded-xl bg-white p-3"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="max-h-full max-w-3xl space-y-2 rounded-xl bg-white p-3" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between gap-4 text-sm">
               <span className="font-medium">{photoOpen.title}</span>
               <button type="button" className={btn} onClick={() => setPhotoOpen(null)}>
@@ -439,11 +520,7 @@ export function AssetTable() {
               </button>
             </div>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={photoOpen.src}
-              alt="Foto validasi"
-              className="max-h-[75vh] w-full rounded object-contain"
-            />
+            <img src={photoOpen.src} alt="Foto validasi" className="max-h-[75vh] w-full rounded object-contain" />
           </div>
         </div>
       )}
@@ -452,9 +529,5 @@ export function AssetTable() {
 }
 
 function UnknownAware({ value }: { value: string }) {
-  return value === UNKNOWN_VALUE ? (
-    <span className="italic text-slate-400">{value}</span>
-  ) : (
-    <>{value}</>
-  );
+  return value === UNKNOWN_VALUE ? <span className="italic text-slate-400">{value}</span> : <>{value}</>;
 }

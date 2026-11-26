@@ -2,23 +2,20 @@
 
 import { useState } from "react";
 import { Badge } from "@/components/badge";
-import { useMapping } from "@/components/mapping-provider";
 import { PhotoInput } from "@/components/photo-input";
 import { Scanner } from "@/components/scanner";
-import {
-  matchSerial,
-  normalizeSerial,
-  validateSerial,
-} from "@/lib/match";
-import { currentTechnician } from "@/lib/mock-data";
-import type {
-  Asset,
-  AssetHistory,
-  MatchResponse,
-  MatchResultType,
-} from "@/lib/types";
+import { useOffice } from "@/components/technician-provider";
+import { errorMessage } from "@/lib/api";
+import { normalizeSerial, validateSerial } from "@/lib/match";
+import { matchSerialNumber, patchAsset, saveScan } from "@/lib/technician";
+import type { Asset, MatchResponse, MatchResultType } from "@/lib/types";
 
 const STATUS_OPTIONS = ["Aktif", "Rusak", "Tidak Aktif"];
+
+const ERRORS = {
+  LABEL_IN_USE: "Kode label ini sudah dipakai aset lain.",
+  SCHEDULE_INACTIVE: "Jadwal kantor ini tidak aktif hari ini, jadi data tidak bisa diubah.",
+};
 
 interface SavedEntry {
   sn: string;
@@ -42,7 +39,9 @@ const resultTone: Record<MatchResultType, "green" | "red" | "amber"> = {
 };
 
 export function MappingWorkspace({ chassisId }: { chassisId: number }) {
-  const { assets, updateAsset, addHistory } = useMapping();
+  const { assets, scheduleId, refresh } = useOffice();
+  const all = assets ?? [];
+  const [saving, setSaving] = useState(false);
   const [sn, setSn] = useState("");
   const [scanning, setScanning] = useState(false);
   const [scanningLabel, setScanningLabel] = useState(false);
@@ -81,15 +80,20 @@ export function MappingWorkspace({ chassisId }: { chassisId: number }) {
       setError(invalid);
       return;
     }
+    if (scheduleId === null) {
+      setError("Jadwal kantor ini belum tersedia.");
+      return;
+    }
     setError(null);
     setLoading(true);
     setSelected(null);
     try {
-      const res = await matchSerial(value, assets);
+      // Pencocokan dilakukan backend, hanya ke modul di kantor jadwal ini.
+      const res = await matchSerialNumber(value, scheduleId, "module");
       setMatch(res);
       if (res.result === "found") selectAsset(res.assets[0]);
-    } catch {
-      setError("Gagal mencocokkan serial number. Coba lagi.");
+    } catch (err) {
+      setError(errorMessage(err, ERRORS, "Gagal mencocokkan serial number. Coba lagi."));
     } finally {
       setLoading(false);
     }
@@ -104,51 +108,66 @@ export function MappingWorkspace({ chassisId }: { chassisId: number }) {
   const labelTaken =
     selected !== null &&
     trimmedLabel !== "" &&
-    assets.some((a) => a.id !== selected.id && a.labelCode === trimmedLabel);
+    all.some((a) => a.id !== selected.id && a.labelCode === trimmedLabel);
 
-  function handleSave() {
-    if (!match) return;
-    const changes: string[] = [];
-    if (selected) {
-      if (ref !== selected.ref) changes.push(`REF: ${selected.ref} → ${ref}`);
-      if (status !== selected.status)
-        changes.push(`STATUS: ${selected.status} → ${status}`);
+  // Simpan hasil scan ke backend. Aset yang cocok menjadi "sudah" dengan foto dan label; perubahan REF/STATUS
+  // dicatat backend ke riwayat. SN yang tidak dikenal tercatat sebagai not_found.
+  async function handleSave() {
+    if (!match || scheduleId === null) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const changes: string[] = [];
+      if (selected) {
+        await saveScan({
+          scheduleId,
+          scannedSn: sn,
+          kind: "module",
+          assetId: selected.id,
+          labelCode: trimmedLabel,
+          photoUrl: photoUrl ?? undefined,
+        });
+        const fields: { ref?: string; status?: string } = {};
+        if (ref !== selected.ref) fields.ref = ref;
+        if (status !== selected.status) fields.status = status;
+        if (fields.ref !== undefined) changes.push(`REF: ${selected.ref} → ${ref}`);
+        if (fields.status !== undefined) changes.push(`STATUS: ${selected.status} → ${status}`);
+        if (Object.keys(fields).length > 0) {
+          try {
+            await patchAsset(selected.id, scheduleId, fields);
+          } catch (err) {
+            // Mapping sudah tersimpan; hanya perubahan REF/STATUS yang gagal.
+            changes.length = 0;
+            changes.push(`REF/STATUS belum tersimpan: ${errorMessage(err)}`);
+          }
+        }
+      } else {
+        await saveScan({ scheduleId, scannedSn: sn, kind: "module" });
+      }
+      await refresh();
+      setSaved((prev) => [
+        {
+          sn,
+          result: match.result,
+          eq: selected?.eq ?? null,
+          changes,
+          labelCode: selected ? trimmedLabel : null,
+          photoUrl: selected ? photoUrl : null,
+        },
+        ...prev,
+      ]);
+      reset();
+    } catch (err) {
+      setError(errorMessage(err, ERRORS));
+    } finally {
+      setSaving(false);
     }
-    if (selected) {
-      const now = new Date().toISOString();
-      const entries: Omit<AssetHistory, "id">[] = [];
-      if (ref !== selected.ref)
-        entries.push({ assetId: selected.id, field: "ref", oldValue: selected.ref, newValue: ref, changedBy: currentTechnician, changedAt: now });
-      if (status !== selected.status)
-        entries.push({ assetId: selected.id, field: "status", oldValue: selected.status, newValue: status, changedBy: currentTechnician, changedAt: now });
-      addHistory(entries);
-      updateAsset(selected.id, {
-        ref,
-        status,
-        mappingStatus: "sudah",
-        labelStatus: "terpasang",
-        labelCode: trimmedLabel,
-        photoUrl,
-        rejection: null,
-      });
-    }
-    setSaved((prev) => [
-      {
-        sn,
-        result: match.result,
-        eq: selected?.eq ?? null,
-        changes,
-        labelCode: selected ? trimmedLabel : null,
-        photoUrl: selected ? photoUrl : null,
-      },
-      ...prev,
-    ]);
-    reset();
   }
 
   // Aset yang cocok baru bisa diselesaikan setelah ada foto validasi dan
   // kode label dari hasil scan QR label.
   const canSave =
+    !saving &&
     match !== null &&
     (match.result === "not_found" ||
       (selected !== null &&
@@ -209,10 +228,6 @@ export function MappingWorkspace({ chassisId }: { chassisId: number }) {
             {loading ? "Mencocokkan…" : "Cocokkan"}
           </button>
         </form>
-        <p className="text-xs text-slate-500">
-          Mode pengembangan, SN contoh: SN-A1004 (ditemukan), SN-DUP900
-          (lebih dari satu, chassis CH-JKT-01), SN-ZZ999 (tidak ditemukan).
-        </p>
       </section>
 
       {match && (
@@ -316,7 +331,7 @@ export function MappingWorkspace({ chassisId }: { chassisId: number }) {
 
           {selected && (
             <div className="space-y-4 border-t border-slate-100 pt-4">
-              <PhotoInput value={photoUrl} onChange={setPhotoUrl} />
+              <PhotoInput value={photoUrl} onChange={setPhotoUrl} scheduleId={scheduleId} />
 
               <div className="space-y-2">
                 <label className="block text-sm font-medium">
@@ -377,11 +392,11 @@ export function MappingWorkspace({ chassisId }: { chassisId: number }) {
             </button>
             <button
               type="button"
-              onClick={handleSave}
+              onClick={() => void handleSave()}
               disabled={!canSave}
               className="flex-1 rounded-md bg-emerald-600 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
             >
-              Selesai mapping
+              {saving ? "Menyimpan…" : "Selesai mapping"}
             </button>
           </div>
         </section>
